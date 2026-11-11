@@ -1,5 +1,5 @@
 {
   "school1.example.edu": {"mode": "school", "tenantId": "00000000-0000-0000-0000-000000000001", "schoolName": "학교 A"},
-  "school2.example.edu": {"mode": "school", "tenantId": "00000000-0000-0000-0000-000000000002", "schoolName": "학교 B"},
+  "school2.example.edu": {"mode": "school", "tenantId": "00000000-0000-0000-0000-000000000002", "schoolName": "학교 B", "requireMfa": true},
   "id.example.edu": {"mode": "route", "tenantId": "00000000-0000-0000-0000-000000000001", "schoolName": "통합 아이디(라우팅 실험)"}
 }

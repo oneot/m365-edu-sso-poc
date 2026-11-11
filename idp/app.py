@@ -4,13 +4,18 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 테넌트(학교) 구분: 로그인 주소의 도메인  /saml/m365/<domain>/sso
 - Entra 요구사항: 도메인마다 고유한 Issuer  {IDP_BASE_URL}/saml/m365/<domain>
 - 서명 인증서: 모든 도메인 공통 1개(교체용 next 인증서 지원)
+- 2단계 인증: 학교 도메인에 requireMfa 가 있거나 계정에 mfa 플래그가 있으면 TOTP를 요구하고,
+  실제로 통과한 세션에만 MFA 수행 표시(AuthnContextClassRef multipleauthn)를 붙인다.
 """
 import base64
 import collections
 import datetime as dt
+import hashlib
+import hmac
 import json
 import os
 import secrets
+import struct
 import threading
 import time
 from urllib.parse import quote, urlencode
@@ -25,6 +30,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ID_SUFFIX = "@joowon.me"
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
+TOTP_STEP = 30
+
+
+def totp_at(secret_b32, counter, digits=6):
+    """RFC 6238 TOTP(SHA-1, 30초, 6자리). 일반 인증 앱과 같은 방식."""
+    key = base64.b32decode(secret_b32.upper() + "=" * (-len(secret_b32) % 8))
+    mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = mac[-1] & 0x0F
+    return f"{(struct.unpack('>I', mac[offset:offset + 4])[0] & 0x7FFFFFFF) % 10 ** digits:0{digits}d}"
 
 
 def _b64_env(name):
@@ -82,6 +96,7 @@ def create_app(overrides=None):
 
     log_buffer = collections.deque(maxlen=1000)
     pending, failures = {}, collections.defaultdict(collections.deque)
+    last_totp = {}
     lock = threading.Lock()
 
     def log(event, **fields):
@@ -129,6 +144,42 @@ def create_app(overrides=None):
         v = (raw or "").strip().lower()
         return v[: -len(ID_SUFFIX)] if v.endswith(ID_SUFFIX) else v
 
+    def rate_limited(ip):
+        now = time.time()
+        with lock:
+            q = failures[ip]
+            while q and now - q[0] > FAIL_WINDOW:
+                q.popleft()
+            return len(q) >= FAIL_LIMIT
+
+    def record_failure(ip):
+        with lock:
+            failures[ip].append(time.time())
+
+    def needs_mfa(user, domain):
+        return bool(user.get("flags", {}).get("mfa") or domains.get(domain, {}).get("requireMfa"))
+
+    def check_totp(uid, secret, code):
+        code = (code or "").strip().replace(" ", "")
+        if not (len(code) == 6 and code.isdigit()):
+            return False
+        now = int(time.time() // TOTP_STEP)
+        for counter in (now - 1, now, now + 1):
+            if hmac.compare_digest(totp_at(secret, counter), code):
+                with lock:
+                    if counter <= last_totp.get(uid, -1):
+                        return False  # 이미 쓴 코드(재사용 방지)
+                    last_totp[uid] = counter
+                return True
+        return False
+
+    def step_up(uid, **params):
+        if not users[uid].get("totpSecret"):
+            log("mfa_unavailable", uid=uid, **params)
+            return message("이 학교는 2단계 인증이 필요하지만 등록된 인증 수단이 없습니다. 관리자에게 문의해 주세요.", 403)
+        log("mfa_required", uid=uid, **params)
+        return redirect(url_for("mfa", **params))
+
     @app.after_request
     def security_headers(resp):
         resp.headers.setdefault("X-Frame-Options", "DENY")
@@ -161,12 +212,7 @@ def create_app(overrides=None):
                                    school=request.args.get("school", ""), user=request.args.get("user", ""))
 
         ip = (request.remote_addr or "?")
-        now = time.time()
-        with lock:
-            q = failures[ip]
-            while q and now - q[0] > FAIL_WINDOW:
-                q.popleft()
-            too_many = len(q) >= FAIL_LIMIT
+        too_many = rate_limited(ip)
         k = request.form.get("k") or None
         p = get_pending(k) if k else None
         school = domains.get(p["domain"], {}).get("schoolName") if p else None
@@ -177,8 +223,7 @@ def create_app(overrides=None):
         uid = normalize_id(request.form.get("username"))
         user = users.get(uid)
         if not user or not check_password_hash(user["passwordHash"], request.form.get("password", "")):
-            with lock:
-                failures[ip].append(now)
+            record_failure(ip)
             log("login_fail", uid=uid, ip=ip, pending=bool(p))
             return to_login(k=k, err="1", school=school, user=uid)
 
@@ -243,7 +288,7 @@ def create_app(overrides=None):
         accounts = user.get("accounts", [])
 
         if dcfg.get("mode") == "route":
-            chosen = request.form.get("domain") if request.method == "POST" else None
+            chosen = (request.form.get("domain") if request.method == "POST" else None) or p.get("chosen")
             if chosen:
                 target = next((a for a in accounts if a["domain"] == chosen), None)
             elif len(accounts) == 1:
@@ -259,21 +304,63 @@ def create_app(overrides=None):
         if not target:
             log("no_linked_account", uid=uid, domain=p["domain"])
             return message("이 학교(테넌트)에 연결된 계정이 없습니다. 다른 아이디로 로그인해 주세요.", 403)
+        if needs_mfa(user, target["domain"]) and not session.get("mfa"):
+            with lock:
+                p["chosen"] = target["domain"]
+            return step_up(uid, k=k, domain=target["domain"])
 
         flags = user.get("flags", {})
+        mfa_done = bool(session.get("mfa"))
         issuer = issuer_for("unregistered.invalid") if flags.get("badIssuer") else issuer_for(target["domain"])
         key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
         auth_time = dt.datetime.strptime(session.get("auth_time"), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) \
             if session.get("auth_time") else None
         xml = sc.build_response(issuer=issuer, in_response_to=p["request_id"], name_id=target["immutableId"],
-                                upn=target["upn"], key_pem=key, cert_pem=cert, mfa=bool(flags.get("mfa")),
+                                upn=target["upn"], key_pem=key, cert_pem=cert, mfa=mfa_done,
                                 auth_instant=auth_time, tamper=bool(flags.get("badSignature")))
         with lock:
             pending.pop(k, None)
         log("saml_response", uid=uid, requestDomain=p["domain"], targetDomain=target["domain"],
             routed=target["domain"] != p["domain"], upn=target["upn"], issuer=issuer, inResponseTo=p["request_id"],
-            signing=cfg["ACTIVE_SIGNING"], mfa=bool(flags.get("mfa")), tamper=bool(flags.get("badSignature")))
+            signing=cfg["ACTIVE_SIGNING"], mfa=mfa_done, tamper=bool(flags.get("badSignature")))
         return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": p["relay"]})
+
+    @app.route("/mfa", methods=["GET", "POST"])
+    def mfa():
+        uid = session.get("uid")
+        k = request.values.get("k") or ""
+        domain = (request.values.get("domain") or "").lower()
+        app_index = request.values.get("app") or ""
+        if not uid or uid not in users:
+            return to_login(k=k or None)
+        secret = users[uid].get("totpSecret")
+        if not secret:
+            return message("등록된 2단계 인증 수단이 없습니다.", 403)
+
+        def done():
+            if k:
+                return redirect(url_for("saml_continue", k=k))
+            if domain and app_index.isdigit():
+                return redirect(url_for("launch", domain=domain, app=app_index))
+            return redirect(url_for("portal"))
+
+        if session.get("mfa"):
+            return done()
+        view = {"k": k, "domain": domain, "app_index": app_index,
+                "school": domains.get(domain, {}).get("schoolName", ""), "name": users[uid].get("name", uid)}
+        if request.method == "GET":
+            return render_template("mfa.html", err="", **view)
+        ip = request.remote_addr or "?"
+        if rate_limited(ip):
+            log("mfa_blocked", uid=uid, ip=ip)
+            return render_template("mfa.html", err="locked", **view), 429
+        if not check_totp(uid, secret, request.form.get("code")):
+            record_failure(ip)
+            log("mfa_fail", uid=uid, ip=ip, domain=domain or None)
+            return render_template("mfa.html", err="1", **view), 401
+        session["mfa"] = True
+        log("mfa_ok", uid=uid, domain=domain or None)
+        return done()
 
     @app.get("/portal")
     def portal():
@@ -305,11 +392,12 @@ def create_app(overrides=None):
             abort(400)
         if not account or domains.get(domain, {}).get("mode") != "school":
             abort(403)
+        if needs_mfa(users[uid], domain) and not session.get("mfa"):
+            return step_up(uid, domain=domain, app=request.args.get("app", "0"))
         key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
-        flags = users[uid].get("flags", {})
         xml = sc.build_response(issuer=issuer_for(domain), in_response_to=None, name_id=account["immutableId"],
-                                upn=account["upn"], key_pem=key, cert_pem=cert, mfa=bool(flags.get("mfa")))
-        log("idp_initiated", uid=uid, domain=domain, upn=account["upn"], relayState=target)
+                                upn=account["upn"], key_pem=key, cert_pem=cert, mfa=bool(session.get("mfa")))
+        log("idp_initiated", uid=uid, domain=domain, upn=account["upn"], relayState=target, mfa=bool(session.get("mfa")))
         return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": target})
 
     @app.route("/saml/m365/slo", methods=["GET", "POST"])

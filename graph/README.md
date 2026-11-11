@@ -88,13 +88,20 @@
 
 ## 알려진 제한
 
-- 가짜 테넌트 5개로 Graph 호출을 흉내 낸 오프라인 테스트(`tests/Test-Offline.ps1`, 34개 검사)를 통과했습니다. 실제 테넌트 실행 결과는 저장소 README의 PoC 결과를 참고하세요.
+- 가짜 테넌트 5개로 Graph 호출을 흉내 낸 오프라인 테스트(`tests/Test-Offline.ps1`, 34개 검사)를 통과했습니다.
+- 실제 테넌트 2개(PoC 하위 도메인 3개)에서 `Inventory`, `SetImmutableId`, `Federate`를 실행했습니다(2026-11-12). 로그인 시험 결과는 저장소 README의 PoC 결과를 참고하세요.
 - 학교 도메인이 기본 도메인이면 경고만 표시합니다. MS 문서상 페더레이션 도메인은 기본 도메인으로 지정할 수 없어, 기본 도메인을 먼저 바꿔야 하는지는 PoC에서 확인해야 합니다.
 - 기본 도메인 변경, 사용자 생성, 페더레이션 후 ImmutableID 변경은 포함하지 않습니다. 페더레이션 도메인 사용자는 생성할 때 ImmutableID를 넣어야 하며, M365 관리 센터에서는 만들 수 없습니다(MS 문서).
 - 관리자 역할을 가진 사용자의 ImmutableID는 User Administrator로 바꿀 수 없어 FAIL로 기록됩니다.
 - Entra Connect로 동기화되는 테넌트는 차단합니다(별도 설계 필요).
 - 테넌트마다 전체 사용자를 조회하므로 사용자 수가 많으면 시간이 걸립니다.
 - 1,400개 테넌트를 위임 방식으로 돌리면 로그인을 반복해야 합니다. 무인 실행은 앱 인증서 방식이나 AccessToken 방식을 권장합니다.
+
+## PoC에서 확인한 설정 동작
+
+- `FederatedIdpMfaBehavior = acceptIfMfaDoneByFederatedIdp`: IdP가 `multipleauthn`을 보내면 테넌트의 MFA 필수 조건부 액세스를 충족합니다(Entra 로그인 로그: "MFA requirement satisfied by claim in the token"). 보내지 않으면 Entra MFA 등록 화면으로 넘어갑니다.
+- `promptLoginBehavior`: 스크립트는 설정하지 않습니다. `nativeSupport`로 바꿔도 앱의 재인증 요구(prompt=login)가 SAML 요청에 담기지 않았습니다.
+- `nextSigningCertificate`: 승격 전에도 next 인증서로 서명한 응답을 받아들였습니다. 5단계(선등록 → IdP 서명 전환 → 승격)를 테넌트마다 시점을 맞추지 않고 진행할 수 있습니다.
 
 ## 근거 문서
 

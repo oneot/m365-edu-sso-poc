@@ -3,19 +3,23 @@
 IdP 계정 아이디는 '아이디@joowon.me' 형식(IdP 안에서만 쓰는 ID)이고,
 각 학교 테넌트의 실제 Microsoft 365 계정(UPN)과 ImmutableID로 연결된다.
 
-사용: python make_test_data.py --domains ../idp/data/domains.json --out-dir ../out --password-file <경로>
+사용: python make_test_data.py --domains ../idp/data/domains.json --out-dir ../out --password-file <경로> [--totp-file <경로>]
   - ../idp/data/users.json 을 만든다(비밀번호 해시 포함, 저장소에 올리지 않음).
   - out/entra-users.json  : 테넌트에 만들 사용자와 라이선스 대상 여부
   - out/immutableid.csv   : Invoke-SenM365Federation.ps1 -Mode SetImmutableId 입력
   - 비밀번호는 --password-file 에만 평문으로 저장한다(이미 있으면 재사용).
+  - 2단계 인증이 필요한 계정(mfa 플래그 또는 requireMfa 학교 소속)에는 TOTP 비밀값을 만들고(있으면 유지),
+    --totp-file 에 인증 앱 등록용 otpauth 주소를 저장한다.
 """
 import argparse
+import base64
 import csv
 import json
 import os
 import secrets
 import string
 import uuid
+from urllib.parse import quote
 
 from werkzeug.security import generate_password_hash
 
@@ -37,6 +41,7 @@ def main():
     ap.add_argument("--domains", required=True)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--password-file", required=True)
+    ap.add_argument("--totp-file")
     args = ap.parse_args()
 
     domains = json.load(open(args.domains, encoding="utf-8"))
@@ -57,7 +62,7 @@ def main():
 
     users_path = os.path.join(os.path.dirname(os.path.abspath(args.domains)), "users.json")
     old = json.load(open(users_path, encoding="utf-8")) if os.path.exists(users_path) else {}
-    users, entra, csv_rows = {}, [], []
+    users, entra, csv_rows, totp = {}, [], [], {}
     for uid, name, role, schools, flags, licensed, note in ACCOUNTS:
         prev = {a["domain"]: a["immutableId"] for a in old.get(uid, {}).get("accounts", [])}
         immutable = next(iter(prev.values()), None) or uuid.uuid4().hex
@@ -76,6 +81,11 @@ def main():
             "accounts": accounts,
             "flags": {k: v for k, v in flags.items() if k != "skipImmutableId"},
         }
+        if flags.get("mfa") or any(domains[a["domain"]].get("requireMfa") for a in accounts):
+            secret = old.get(uid, {}).get("totpSecret") or base64.b32encode(secrets.token_bytes(20)).decode()
+            users[uid]["totpSecret"] = secret
+            totp[uid] = (f"otpauth://totp/{quote('SSO PoC')}:{uid}%40joowon.me"
+                         f"?secret={secret}&issuer={quote('SSO PoC')}&digits=6&period=30")
 
     with open(users_path, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
@@ -86,7 +96,11 @@ def main():
         w = csv.DictWriter(f, fieldnames=["TenantId", "UserPrincipalName", "ImmutableId"])
         w.writeheader()
         w.writerows(csv_rows)
-    print(f"IdP 계정 {len(users)}개, 테넌트 계정 {len(entra)}개, ImmutableID 매핑 {len(csv_rows)}행")
+    if args.totp_file and totp:
+        with open(args.totp_file, "w", encoding="utf-8") as f:
+            json.dump(totp, f, ensure_ascii=False, indent=2)
+        os.chmod(args.totp_file, 0o600)
+    print(f"IdP 계정 {len(users)}개, 테넌트 계정 {len(entra)}개, ImmutableID 매핑 {len(csv_rows)}행, TOTP {len(totp)}개")
 
 
 if __name__ == "__main__":

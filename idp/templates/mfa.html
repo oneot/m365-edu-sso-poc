@@ -1,0 +1,21 @@
+{% extends "_layout.html" %}
+{% block title %}2단계 인증 · 학교 SSO (PoC){% endblock %}
+{% block body %}
+<main class="sheet">
+  <h1>2단계 인증</h1>
+  <p class="sub">{% if school %}{{ school }}은(는) 2단계 인증이 필요합니다. {% endif %}{{ name }}님의 인증 앱에 표시된 6자리 코드를 입력하세요.</p>
+  {% if err == "1" %}<p class="alert" role="alert">코드가 맞지 않거나 이미 사용한 코드입니다. 새 코드를 입력해 주세요.</p>
+  {% elif err == "locked" %}<p class="alert" role="alert">시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.</p>{% endif %}
+  <form method="post" action="{{ url_for('mfa') }}">
+    <input type="hidden" name="k" value="{{ k }}">
+    <input type="hidden" name="domain" value="{{ domain }}">
+    <input type="hidden" name="app" value="{{ app_index }}">
+    <label for="code">인증 코드</label>
+    <div class="field">
+      <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"
+             placeholder="6자리 숫자" required autofocus>
+    </div>
+    <button type="submit" class="primary">확인</button>
+  </form>
+</main>
+{% endblock %}
