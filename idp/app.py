@@ -1,0 +1,355 @@
+"""테스트용 SAML 2.0 IdP (Microsoft 365 다중 테넌트 도메인 페더레이션 PoC).
+
+IdP 한 벌로 여러 테넌트를 처리한다.
+- 테넌트(학교) 구분: 로그인 주소의 도메인  /saml/m365/<domain>/sso
+- Entra 요구사항: 도메인마다 고유한 Issuer  {IDP_BASE_URL}/saml/m365/<domain>
+- 서명 인증서: 모든 도메인 공통 1개(교체용 next 인증서 지원)
+"""
+import base64
+import collections
+import datetime as dt
+import json
+import os
+import secrets
+import threading
+import time
+from urllib.parse import quote, urlencode
+
+from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
+
+import saml_core as sc
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ID_SUFFIX = "@joowon.me"
+PENDING_TTL = 15 * 60
+FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
+
+
+def _b64_env(name):
+    v = os.environ.get(name, "")
+    return base64.b64decode(v).decode() if v else ""
+
+
+def _read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _env_config():
+    keys_dir = os.environ.get("KEYS_DIR", "")
+    def pem(env_b64, file_name):
+        if os.environ.get(env_b64):
+            return _b64_env(env_b64)
+        if keys_dir and os.path.exists(os.path.join(keys_dir, file_name)):
+            return _read(os.path.join(keys_dir, file_name))
+        return ""
+    return {
+        "IDP_BASE_URL": os.environ.get("IDP_BASE_URL", "https://auth.joowon.me").rstrip("/"),
+        "LOGIN_UI_URL": os.environ.get("LOGIN_UI_URL", "").strip(),
+        "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
+        "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
+        "ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
+        "ACTIVE_SIGNING": os.environ.get("ACTIVE_SIGNING", "current"),
+        "KEYS": {
+            "current": (pem("SIGNING_KEY_B64", "current.key"), pem("SIGNING_CERT_B64", "current.pem")),
+            "next": (pem("NEXT_SIGNING_KEY_B64", "next.key"), pem("NEXT_SIGNING_CERT_B64", "next.pem")),
+        },
+    }
+
+
+def create_app(overrides=None):
+    cfg = {**_env_config(), **(overrides or {})}
+    data_dir = cfg["DATA_DIR"]
+    domains = {k.lower(): v for k, v in json.loads(_read(os.path.join(data_dir, "domains.json"))).items()}
+    users = json.loads(_read(os.path.join(data_dir, "users.json")))
+    links = json.loads(_read(os.path.join(data_dir, "links.json")))
+    if not cfg["KEYS"].get(cfg["ACTIVE_SIGNING"], ("", ""))[0]:
+        raise RuntimeError(f"서명 키가 없습니다: {cfg['ACTIVE_SIGNING']}")
+
+    app = Flask(__name__, template_folder="templates", static_folder="static")
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.config.update(
+        SECRET_KEY=cfg["SECRET_KEY"],
+        SESSION_COOKIE_NAME="idp_session",
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        # Entra가 POST로 로그인 요청을 보내도 기존 로그인 세션이 전달되도록 None
+        SESSION_COOKIE_SAMESITE="None",
+        PERMANENT_SESSION_LIFETIME=dt.timedelta(hours=8),
+    )
+
+    log_buffer = collections.deque(maxlen=1000)
+    pending, failures = {}, collections.defaultdict(collections.deque)
+    lock = threading.Lock()
+
+    def log(event, **fields):
+        entry = {"t": sc.fmt(sc.utcnow()), "event": event, **fields}
+        log_buffer.appendleft(entry)
+        print(json.dumps(entry, ensure_ascii=False), flush=True)
+
+    def issuer_for(domain):
+        return f"{cfg['IDP_BASE_URL']}/saml/m365/{domain}"
+
+    def public_base():
+        return request.host_url.rstrip("/")
+
+    def put_pending(item):
+        k = secrets.token_urlsafe(18)
+        now = time.time()
+        with lock:
+            for old in [key for key, v in pending.items() if now - v["t"] > PENDING_TTL]:
+                pending.pop(old, None)
+            pending[k] = {**item, "t": now}
+        return k
+
+    def get_pending(k):
+        with lock:
+            item = pending.get(k or "")
+        if item and time.time() - item["t"] <= PENDING_TTL:
+            return item
+        return None
+
+    def message(text, status=200, title="안내"):
+        return render_template("message.html", title=title, text=text), status
+
+    def to_login(k=None, err=None, school=None, user=None):
+        params = {key: v for key, v in {"k": k, "err": err, "school": school, "user": user}.items() if v}
+        if cfg["LOGIN_UI_URL"]:
+            params["api"] = public_base()
+            return redirect(f"{cfg['LOGIN_UI_URL']}?{urlencode(params)}")
+        return redirect(url_for("login", **params))
+
+    def post_to_entra(fields):
+        return render_template("post.html", action=sc.ENTRA_ACS,
+                               fields={k: v for k, v in fields.items() if v is not None})
+
+    def normalize_id(raw):
+        v = (raw or "").strip().lower()
+        return v[: -len(ID_SUFFIX)] if v.endswith(ID_SUFFIX) else v
+
+    @app.after_request
+    def security_headers(resp):
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Cache-Control", "no-store")
+        resp.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; script-src 'self'; form-action 'self' https://login.microsoftonline.com; "
+            "frame-ancestors 'none'",
+        )
+        return resp
+
+    @app.get("/healthz")
+    def healthz():
+        return {"ok": True, "activeSigning": cfg["ACTIVE_SIGNING"], "domains": sorted(domains), "time": sc.fmt(sc.utcnow())}
+
+    @app.get("/")
+    def home():
+        return redirect(url_for("portal") if session.get("uid") else url_for("login"))
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if request.method == "GET":
+            if cfg["LOGIN_UI_URL"]:
+                return to_login(k=request.args.get("k"), err=request.args.get("err"),
+                                school=request.args.get("school"), user=request.args.get("user"))
+            return render_template("login.html", k=request.args.get("k", ""), err=request.args.get("err", ""),
+                                   school=request.args.get("school", ""), user=request.args.get("user", ""))
+
+        ip = (request.remote_addr or "?")
+        now = time.time()
+        with lock:
+            q = failures[ip]
+            while q and now - q[0] > FAIL_WINDOW:
+                q.popleft()
+            too_many = len(q) >= FAIL_LIMIT
+        k = request.form.get("k") or None
+        p = get_pending(k) if k else None
+        school = domains.get(p["domain"], {}).get("schoolName") if p else None
+        if too_many:
+            log("login_blocked", ip=ip)
+            return to_login(k=k, err="locked", school=school)
+
+        uid = normalize_id(request.form.get("username"))
+        user = users.get(uid)
+        if not user or not check_password_hash(user["passwordHash"], request.form.get("password", "")):
+            with lock:
+                failures[ip].append(now)
+            log("login_fail", uid=uid, ip=ip, pending=bool(p))
+            return to_login(k=k, err="1", school=school, user=uid)
+
+        session.clear()
+        session.permanent = True
+        session["uid"] = uid
+        session["auth_time"] = sc.fmt(sc.utcnow())
+        log("login_ok", uid=uid, ip=ip, pending=bool(p), via=request.headers.get("Origin") or "same-origin")
+        if k and not p:
+            return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
+        return redirect(url_for("saml_continue", k=k) if p else url_for("portal"))
+
+    @app.get("/logout")
+    def logout():
+        log("logout", uid=session.get("uid"))
+        session.clear()
+        return to_login()
+
+    @app.route("/saml/m365/<domain>/sso", methods=["GET", "POST"])
+    def sso(domain):
+        domain = domain.lower()
+        if domain not in domains:
+            abort(404)
+        binding = "redirect" if request.method == "GET" else "post"
+        src = request.args if binding == "redirect" else request.form
+        saml_request, relay = src.get("SAMLRequest"), src.get("RelayState")
+        if not saml_request:
+            return message("SAMLRequest가 없습니다. Microsoft 365 로그인 화면에서 시작해 주세요.", 400)
+        try:
+            req = sc.parse_authn_request(saml_request, binding)
+        except Exception as e:  # noqa: BLE001
+            log("authn_request_invalid", domain=domain, binding=binding, error=str(e)[:200])
+            return message("로그인 요청을 해석하지 못했습니다.", 400)
+
+        log("authn_request", domain=domain, binding=binding, requestId=req["id"], sp=req["issuer"],
+            forceAuthn=req["force_authn"], isPassive=req["is_passive"], signed=req["signed"],
+            nameIdFormat=req["nameid_format"], paramKeys=sorted(src.keys()),
+            username=src.get("username") or src.get("login_hint"), relayStateLen=len(relay or ""),
+            userAgent=(request.headers.get("User-Agent") or "")[:120], hasSession=bool(session.get("uid")))
+        k = put_pending({"domain": domain, "request_id": req["id"], "relay": relay, "binding": binding})
+
+        if req["is_passive"] and not session.get("uid"):
+            xml = sc.build_status_response(issuer=issuer_for(domain), in_response_to=req["id"],
+                                           second_level=sc.STATUS_NO_PASSIVE)
+            log("saml_no_passive", domain=domain, requestId=req["id"])
+            return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": relay})
+        if not session.get("uid") or req["force_authn"]:
+            return to_login(k=k, school=domains[domain].get("schoolName"))
+        return redirect(url_for("saml_continue", k=k))
+
+    @app.route("/saml/continue", methods=["GET", "POST"])
+    def saml_continue():
+        k = request.values.get("k")
+        p = get_pending(k)
+        if not p:
+            return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
+        uid = session.get("uid")
+        if not uid or uid not in users:
+            return to_login(k=k, school=domains[p["domain"]].get("schoolName"))
+        user = users[uid]
+        dcfg = domains[p["domain"]]
+        accounts = user.get("accounts", [])
+
+        if dcfg.get("mode") == "route":
+            chosen = request.form.get("domain") if request.method == "POST" else None
+            if chosen:
+                target = next((a for a in accounts if a["domain"] == chosen), None)
+            elif len(accounts) == 1:
+                target = accounts[0]
+            else:
+                choices = [{"domain": a["domain"], "upn": a["upn"],
+                            "school": domains.get(a["domain"], {}).get("schoolName", a["domain"])} for a in accounts]
+                log("route_choose", uid=uid, options=[c["domain"] for c in choices])
+                return render_template("choose.html", k=k, choices=choices, name=user.get("name", uid))
+        else:
+            target = next((a for a in accounts if a["domain"] == p["domain"]), None)
+
+        if not target:
+            log("no_linked_account", uid=uid, domain=p["domain"])
+            return message("이 학교(테넌트)에 연결된 계정이 없습니다. 다른 아이디로 로그인해 주세요.", 403)
+
+        flags = user.get("flags", {})
+        issuer = issuer_for("unregistered.invalid") if flags.get("badIssuer") else issuer_for(target["domain"])
+        key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
+        auth_time = dt.datetime.strptime(session.get("auth_time"), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) \
+            if session.get("auth_time") else None
+        xml = sc.build_response(issuer=issuer, in_response_to=p["request_id"], name_id=target["immutableId"],
+                                upn=target["upn"], key_pem=key, cert_pem=cert, mfa=bool(flags.get("mfa")),
+                                auth_instant=auth_time, tamper=bool(flags.get("badSignature")))
+        with lock:
+            pending.pop(k, None)
+        log("saml_response", uid=uid, requestDomain=p["domain"], targetDomain=target["domain"],
+            routed=target["domain"] != p["domain"], upn=target["upn"], issuer=issuer, inResponseTo=p["request_id"],
+            signing=cfg["ACTIVE_SIGNING"], mfa=bool(flags.get("mfa")), tamper=bool(flags.get("badSignature")))
+        return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": p["relay"]})
+
+    @app.get("/portal")
+    def portal():
+        uid = session.get("uid")
+        if not uid or uid not in users:
+            return to_login()
+        user = users[uid]
+        rows = []
+        for a in user.get("accounts", []):
+            d = domains.get(a["domain"], {})
+            values = {"upn": quote(a["upn"]), "domain": a["domain"], "tenantId": d.get("tenantId", "")}
+            rows.append({"school": d.get("schoolName", a["domain"]), "upn": a["upn"],
+                         "links": [{"label": l["label"], "url": l["url"].format(**values),
+                                    "launch": url_for("launch", domain=a["domain"], app=i)}
+                                   for i, l in enumerate(links)]})
+        return render_template("portal.html", name=user.get("name", uid), uid=uid, rows=rows)
+
+    @app.get("/portal/launch")
+    def launch():
+        """IdP 시작 방식(요청 없이 보내는 SAML 응답). Entra가 받아 주는지 PoC로 확인하는 실험 경로."""
+        uid = session.get("uid")
+        if not uid or uid not in users:
+            return to_login()
+        domain = (request.args.get("domain") or "").lower()
+        account = next((a for a in users[uid].get("accounts", []) if a["domain"] == domain), None)
+        try:
+            target = links[int(request.args.get("app", "0"))]["target"]
+        except (ValueError, IndexError):
+            abort(400)
+        if not account or domains.get(domain, {}).get("mode") != "school":
+            abort(403)
+        key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
+        flags = users[uid].get("flags", {})
+        xml = sc.build_response(issuer=issuer_for(domain), in_response_to=None, name_id=account["immutableId"],
+                                upn=account["upn"], key_pem=key, cert_pem=cert, mfa=bool(flags.get("mfa")))
+        log("idp_initiated", uid=uid, domain=domain, upn=account["upn"], relayState=target)
+        return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": target})
+
+    @app.route("/saml/m365/slo", methods=["GET", "POST"])
+    def slo():
+        binding = "redirect" if request.method == "GET" else "post"
+        src = request.args if binding == "redirect" else request.form
+        info = sc.describe_logout_request(src["SAMLRequest"], binding) if src.get("SAMLRequest") else {}
+        log("logout_request", binding=binding, paramKeys=sorted(src.keys()), uid=session.get("uid"), **info)
+        session.clear()
+        return message("로그아웃되었습니다. 창을 닫아도 됩니다.")
+
+    @app.get("/saml/m365/<domain>/metadata")
+    def metadata(domain):
+        domain = domain.lower()
+        if domain not in domains:
+            abort(404)
+        certs = [c for _, c in cfg["KEYS"].values() if c]
+        xml = sc.build_metadata(entity_id=issuer_for(domain), sso_url=f"{issuer_for(domain)}/sso",
+                                slo_url=f"{cfg['IDP_BASE_URL']}/saml/m365/slo", certs_pem=certs)
+        return Response(xml, mimetype="application/samlmetadata+xml")
+
+    def admin_ok():
+        token = cfg["ADMIN_TOKEN"]
+        given = request.args.get("token") or request.headers.get("X-Admin-Token", "")
+        return bool(token) and secrets.compare_digest(given, token)
+
+    @app.get("/admin/log")
+    def admin_log():
+        if not admin_ok():
+            abort(404)
+        return render_template("admin_log.html", entries=list(log_buffer))
+
+    @app.get("/admin/log.json")
+    def admin_log_json():
+        if not admin_ok():
+            abort(404)
+        return {"entries": list(log_buffer)}
+
+    return app
+
+
+if __name__ == "__main__":
+    create_app().run(host="127.0.0.1", port=5000, debug=False)

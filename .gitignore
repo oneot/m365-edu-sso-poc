@@ -1,0 +1,16 @@
+# 비밀값·환경별 데이터는 저장소에 올리지 않는다
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+out/
+tests/offline/
+idp/data/users.json
+idp/data/domains.json
+*.key
+*.pem
+*.cer
+*.pfx
+*.env
+msal_cache.bin*

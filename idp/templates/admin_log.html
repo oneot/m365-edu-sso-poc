@@ -1,0 +1,17 @@
+{% extends "_layout.html" %}
+{% block title %}IdP 기록{% endblock %}
+{% block body %}
+<main class="sheet wide">
+  <h1>IdP 기록 (최근 {{ entries|length }}건)</h1>
+  <table class="log">
+    <thead><tr><th>시각(UTC)</th><th>이벤트</th><th>내용</th></tr></thead>
+    <tbody>
+    {% for e in entries %}
+      <tr><td>{{ e.t }}</td><td>{{ e.event }}</td>
+        <td><pre>{% for k, v in e.items() if k not in ('t', 'event') %}{{ k }}={{ v }}
+{% endfor %}</pre></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</main>
+{% endblock %}

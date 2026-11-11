@@ -1,0 +1,40 @@
+{% extends "_layout.html" %}
+{% block body %}
+<main class="card">
+  <section class="form-side">
+    <h1>로그인</h1>
+    {% if school %}<p class="context">{{ school }} Microsoft 365에 로그인합니다.</p>{% endif %}
+    {% if err == "1" %}<p class="alert" role="alert">아이디 또는 비밀번호가 맞지 않습니다.</p>
+    {% elif err == "locked" %}<p class="alert" role="alert">로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.</p>{% endif %}
+    <form id="loginForm" method="post" action="{{ url_for('login') }}" autocomplete="on">
+      <input type="hidden" name="k" id="k" value="{{ k }}">
+      <label for="username">아이디</label>
+      <div class="field">
+        <input id="username" name="username" value="{{ user }}" placeholder="아이디를 입력해 주세요." autocomplete="username"
+               autocapitalize="none" spellcheck="false" required>
+        <span class="suffix">@joowon.me</span>
+      </div>
+      <label for="password">비밀번호</label>
+      <div class="field">
+        <input id="password" name="password" type="password" placeholder="비밀번호를 입력해 주세요."
+               autocomplete="current-password" required>
+        <button type="button" class="eye" id="togglePw" aria-label="비밀번호 보기">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/>
+          </svg>
+        </button>
+      </div>
+      <button type="submit" class="primary">로그인</button>
+    </form>
+    <p class="note">PoC 테스트 전용 로그인 화면입니다.<br>실제 업무 계정의 비밀번호는 입력하지 마세요.</p>
+  </section>
+  <aside class="art-side" aria-hidden="true">
+    <div class="brand">
+      <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#4350dd"/><path d="M9 19l7-7 7 7" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      학교 SSO <span class="tag">PoC</span>
+    </div>
+    <img src="{{ url_for('static', filename='illustration.svg') }}" alt="">
+  </aside>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='login.js') }}"></script>{% endblock %}

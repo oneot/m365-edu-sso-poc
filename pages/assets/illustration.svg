@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 620" preserveAspectRatio="xMidYMax slice" role="img" aria-label="">
+  <defs>
+    <polygon id="star" points="0,-10 2.6,-3.6 9.5,-3.1 4.3,1.4 5.9,8.1 0,4.5 -5.9,8.1 -4.3,1.4 -9.5,-3.1 -2.6,-3.6"/>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 배경 장식 -->
+  <path d="M40 620 L170 360 L310 360 L440 620 Z" fill="url(#beam)"/>
+  <g transform="translate(-34 96) rotate(-16)" fill="#efe9b8">
+    <rect x="0" y="0" width="120" height="92" rx="12"/>
+    <circle cx="120" cy="46" r="19"/>
+    <circle cx="60" cy="0" r="19"/>
+  </g>
+  <g transform="translate(396 168) rotate(22)" fill="#a8cbf5">
+    <rect x="0" y="0" width="112" height="92" rx="12"/>
+    <circle cx="0" cy="46" r="19"/>
+    <circle cx="56" cy="92" r="19"/>
+  </g>
+  <circle cx="384" cy="120" r="5" fill="#ffffff" opacity="0.9"/>
+  <circle cx="96" cy="300" r="4" fill="#ffffff" opacity="0.9"/>
+  <circle cx="420" cy="330" r="6" fill="#ffffff" opacity="0.7"/>
+  <use href="#star" transform="translate(132 196) scale(1.5)" fill="#ffc93c"/>
+  <use href="#star" transform="translate(96 248) scale(1.9)" fill="#ffd45e"/>
+  <use href="#star" transform="translate(402 262) scale(1.3)" fill="#ffc93c"/>
+  <use href="#star" transform="translate(352 150) scale(1.0)" fill="#ffe08a"/>
+
+  <!-- 쌓인 책 -->
+  <g>
+    <rect x="138" y="436" width="204" height="44" rx="9" fill="#5f6ff5"/>
+    <rect x="138" y="452" width="204" height="6" fill="#ffffff" opacity="0.35"/>
+    <rect x="156" y="394" width="170" height="44" rx="9" fill="#ff8a65"/>
+    <rect x="156" y="410" width="170" height="6" fill="#ffffff" opacity="0.35"/>
+    <rect x="174" y="352" width="134" height="44" rx="9" fill="#3fbf9f"/>
+    <rect x="174" y="368" width="134" height="6" fill="#ffffff" opacity="0.35"/>
+  </g>
+
+  <!-- 학사모 -->
+  <g>
+    <path d="M182 300 L182 338 Q240 368 298 338 L298 300 L240 324 Z" fill="#26325f"/>
+    <polygon points="240,246 334,284 240,322 146,284" fill="#33407a"/>
+    <polygon points="240,252 320,284 240,316 160,284" fill="#3d4b8c"/>
+    <circle cx="240" cy="284" r="6" fill="#ffc93c"/>
+    <path d="M240 284 L318 296 L318 344" fill="none" stroke="#ffc93c" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="318" cy="350" r="8" fill="#ffc93c"/>
+  </g>
+
+  <!-- 펼친 책 -->
+  <g>
+    <path d="M20 540 Q130 494 240 522 Q350 494 460 540 L460 620 L20 620 Z" fill="#3e8ed0"/>
+    <path d="M34 530 Q136 484 240 512 L240 606 Q136 578 34 614 Z" fill="#ffffff"/>
+    <path d="M240 512 Q344 484 446 530 L446 614 Q344 578 240 606 Z" fill="#f7faff"/>
+    <g fill="none" stroke="#dce6f5" stroke-width="3" stroke-linecap="round">
+      <path d="M62 548 Q140 520 218 536"/>
+      <path d="M62 566 Q140 538 218 554"/>
+      <path d="M62 584 Q140 556 218 572"/>
+      <path d="M262 536 Q340 520 418 548"/>
+      <path d="M262 554 Q340 538 418 566"/>
+      <path d="M262 572 Q340 556 418 584"/>
+    </g>
+    <path d="M240 512 L240 606" stroke="#c9d6ea" stroke-width="3"/>
+  </g>
+
+  <!-- 연필 -->
+  <g transform="translate(64 470) rotate(38)">
+    <rect x="0" y="0" width="22" height="104" rx="4" fill="#9ec5ff"/>
+    <rect x="0" y="0" width="22" height="18" rx="4" fill="#ff9fb1"/>
+    <rect x="0" y="16" width="22" height="7" fill="#d7dce6"/>
+    <polygon points="0,104 22,104 11,130" fill="#f6d2a8"/>
+    <polygon points="7,118 15,118 11,130" fill="#3a3f4b"/>
+  </g>
+</svg>

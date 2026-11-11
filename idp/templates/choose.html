@@ -1,0 +1,16 @@
+{% extends "_layout.html" %}
+{% block title %}학교 선택 · 학교 SSO (PoC){% endblock %}
+{% block body %}
+<main class="sheet">
+  <h1>어느 학교로 로그인할까요?</h1>
+  <p class="sub">{{ name }}님은 여러 학교에 계정이 있습니다. 들어갈 학교를 고르세요.</p>
+  <form method="post" action="{{ url_for('saml_continue') }}" class="choices">
+    <input type="hidden" name="k" value="{{ k }}">
+    {% for c in choices %}
+    <button class="choice" type="submit" name="domain" value="{{ c.domain }}">
+      <strong>{{ c.school }}</strong><span>{{ c.upn }}</span>
+    </button>
+    {% endfor %}
+  </form>
+</main>
+{% endblock %}

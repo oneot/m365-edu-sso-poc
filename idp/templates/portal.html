@@ -1,0 +1,29 @@
+{% extends "_layout.html" %}
+{% block title %}내 학교 계정 · 학교 SSO (PoC){% endblock %}
+{% block body %}
+<main class="sheet">
+  <div class="top">
+    <div>
+      <h1>{{ name }}님, 안녕하세요</h1>
+      <p class="sub">아이디 {{ uid }}@joowon.me 로 로그인했습니다. 아래 바로가기를 누르면 비밀번호 없이 각 학교 Microsoft 365로 들어갑니다.</p>
+    </div>
+    <a class="btn ghost" href="{{ url_for('logout') }}">로그아웃</a>
+  </div>
+  {% for row in rows %}
+  <section class="tenant">
+    <h2>{{ row.school }}</h2>
+    <div class="upn">{{ row.upn }}</div>
+    <div class="apps">
+      {% for link in row.links %}<a class="btn" href="{{ link.url }}" rel="noopener">{{ link.label }}</a>{% endfor %}
+    </div>
+    <div class="apps">
+      {% for link in row.links %}<a class="btn alt" href="{{ link.launch }}">{{ link.label }} (IdP 시작 실험)</a>{% endfor %}
+    </div>
+    <p class="hint">위 줄은 Microsoft 로그인을 거쳐 들어가는 방식이고, 아래 줄은 이 서버가 먼저 로그인 정보를 보내는 실험 방식입니다.<br>
+      PC·모바일 앱(Teams, Office)에서는 처음 한 번 위 학교 계정을 입력하면 이 로그인 화면으로 넘어옵니다.</p>
+  </section>
+  {% else %}
+  <p class="sub">연결된 학교 계정이 없습니다.</p>
+  {% endfor %}
+</main>
+{% endblock %}

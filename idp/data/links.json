@@ -1,0 +1,6 @@
+[
+  {"label": "Microsoft 365", "target": "https://www.office.com/", "url": "https://www.office.com/?auth=2&login_hint={upn}"},
+  {"label": "Teams", "target": "https://teams.microsoft.com/", "url": "https://teams.microsoft.com/?tenantId={tenantId}&login_hint={upn}"},
+  {"label": "Outlook", "target": "https://outlook.office.com/mail/", "url": "https://outlook.office.com/mail/?login_hint={upn}"},
+  {"label": "OneDrive", "target": "https://www.office.com/launch/onedrive", "url": "https://www.office.com/launch/onedrive?auth=2&login_hint={upn}"}
+]
