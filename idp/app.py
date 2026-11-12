@@ -31,7 +31,7 @@ ID_SUFFIX = "@joowon.me"
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
 TOTP_STEP = 30
-VERSION = "2026-11-12.route-hint"
+VERSION = "2026-11-12.route-xdomain"
 
 
 def totp_at(secret_b32, counter, digits=6):
@@ -337,7 +337,13 @@ def create_app(overrides=None):
 
         flags = user.get("flags", {})
         mfa_done = bool(session.get("mfa"))
-        issuer = issuer_for("unregistered.invalid") if flags.get("badIssuer") else issuer_for(target["domain"])
+        if flags.get("badIssuer"):
+            issuer = issuer_for("unregistered.invalid")
+        elif flags.get("routeIssuerFromRequest") and dcfg.get("mode") == "route":
+            # 시험용: 라우팅 도메인 자신의 Issuer로 응답(학교 계정과 realm이 달라 교차 도메인 로그인이 됨)
+            issuer = issuer_for(p["domain"])
+        else:
+            issuer = issuer_for(target["domain"])
         key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
         auth_time = dt.datetime.strptime(session.get("auth_time"), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) \
             if session.get("auth_time") else None

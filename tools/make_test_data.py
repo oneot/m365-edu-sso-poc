@@ -26,7 +26,8 @@ from werkzeug.security import generate_password_hash
 # (IdP 아이디, 이름, 역할, 연결 학교 키 목록, 플래그, 라이선스 부여 여부, 설명)
 ACCOUNTS = [
     ("student01", "학생01", "학생", ["A"], {}, True, "기본 시나리오(학교 A)"),
-    ("teacher01", "교사01", "교사", ["A"], {}, True, "기본 시나리오(학교 A)"),
+    ("teacher01", "교사01", "교사", ["A"], {"routeIssuerFromRequest": True}, True,
+     "기본 시나리오(학교 A). 통합 아이디로 들어오면 라우팅 도메인 Issuer로 응답(R11, 교차 도메인 차단 확인)"),
     ("student02", "학생02", "학생", ["B"], {}, True, "기본 시나리오(학교 B)"),
     ("multi01", "겸임교사01", "교사", ["A", "B"], {}, True, "두 학교 소속(B-4, 라우팅 학교 선택)"),
     ("mfa01", "MFA학생01", "학생", ["A"], {"mfa": True}, True, "IdP가 MFA 수행 표시(C-7)"),

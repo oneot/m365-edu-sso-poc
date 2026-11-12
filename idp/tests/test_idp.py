@@ -64,6 +64,8 @@ def data_dir(tmp_path):
                     "flags": {}, "totpSecret": SECRET},
         "badissuer01": {"name": "x", "passwordHash": h, "accounts": [_account("badissuer01", D1)],
                         "flags": {"badIssuer": True}},
+        "xdomain01": {"name": "x", "passwordHash": h, "accounts": [_account("xdomain01", D1)],
+                      "flags": {"routeIssuerFromRequest": True}},
         "mfa01": {"name": "m", "passwordHash": h, "accounts": [_account("mfa01", D1)], "flags": {"mfa": True},
                   "totpSecret": SECRET},
     }
@@ -247,6 +249,15 @@ def test_unlinked_tenant_is_refused(client):
 def test_bad_issuer_flag(client):
     root, _, _ = saml_from(full_flow(client, D1, "badissuer01"))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/unregistered.invalid"
+
+
+def test_route_issuer_from_request_flag_only_affects_route_domain(client):
+    root, _, _ = saml_from(full_flow(client, DR, "xdomain01"))
+    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{DR}"
+    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"xdomain01@{D1}"
+    r = start_sso(client, D1, "_req2")  # 같은 세션으로 학교 도메인에서 시작하면 학교 Issuer 그대로
+    root, _, _ = saml_from(get(client, r.location))
+    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D1}"
 
 
 def test_mfa_flag_sets_authn_context(client):

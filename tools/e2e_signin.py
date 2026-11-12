@@ -339,9 +339,11 @@ SCENARIOS = [
      lambda b: b.sign_in(None, domain_hint=DR, idp_user="student02", pre_login=True)),
     ("R10", "4번: 포털 링크 → Microsoft 365 웹, login_hint=통합 아이디", "성공(학교 B)",
      lambda b: b.portal_link("student02", f"https://www.office.com/?auth=2&login_hint=student02%40{DR}")),
+    ("R11", "4번 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답(같은 테넌트 학교 A 계정)", "거부(AADSTS5000820)",
+     lambda b: b.sign_in(f"teacher01@{DR}")),
 ]
 FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2",
-                 "R5", "R6", "R7", "R8", "R9", "R10"}
+                 "R5", "R6", "R7", "R8", "R9", "R10", "R11"}
 
 
 def shared_pc(b):
@@ -371,7 +373,7 @@ VERDICT = {
     "R4": ok_user(f"student02@{D2}"), "P1": ok_user(f"student01@{D1}"), "P2": ok_user(f"multi01@{D2}"),
     "R5": ok_user(f"student02@{D2}"), "R6": ok_error(), "R7": ok_user(f"student02@{D2}"),
     "R8": ok_user(f"student02@{D2}"), "R8b": ok_user(f"student02@{D2}"), "R8c": ok_user(f"student02@{D2}"),
-    "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"),
+    "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"), "R11": ok_error("AADSTS5000820"),
 }
 
 
