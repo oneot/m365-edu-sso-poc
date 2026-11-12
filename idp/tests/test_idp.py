@@ -115,9 +115,15 @@ def post(client, path, **kw):
     return client.post(path, base_url=BASE, **kw)
 
 
-def start_sso(client, domain, req_id="_req1", relay="RS-123", **kw):
-    return get(client, f"/saml/m365/{domain}/sso",
-               query_string={"SAMLRequest": redirect_param(authn_request(req_id, **kw)), "RelayState": relay})
+def start_sso(client, domain, req_id="_req1", relay="RS-123", username=None, **kw):
+    qs = {"SAMLRequest": redirect_param(authn_request(req_id, **kw)), "RelayState": relay}
+    if username:
+        qs["username"] = username
+    return get(client, f"/saml/m365/{domain}/sso", query_string=qs)
+
+
+def qs_of(location):
+    return {k: v[0] for k, v in parse_qs(urlparse(location).query).items()}
 
 
 def k_from(location):
@@ -323,3 +329,53 @@ def test_idp_initiated_launch(client):
     root, xml, relay = saml_from(get(client, f"/portal/launch?domain={D1}&app=1"))
     XMLVerifier().verify(xml, x509_cert=KEYS["current"][1])
     assert root.get("InResponseTo") is None and relay == "https://teams.microsoft.com/"
+
+
+# --- Entra가 넘기는 username(입력한 아이디) 처리 ---
+
+def test_route_hint_prefills_login(client):
+    r = start_sso(client, DR, username=f"Student02@{DR}")
+    assert r.status_code == 302 and "/login" in r.location
+    assert qs_of(r.location)["user"] == "student02"
+
+
+def test_school_hint_is_not_prefilled(client):
+    r = start_sso(client, D1, username=f"student01@{D1}")
+    assert "user" not in qs_of(r.location)
+
+
+def test_shared_pc_hint_mismatch_forces_login(client):
+    full_flow(client, D1, "student01")
+    r = start_sso(client, DR, "_req2", username=f"student02@{DR}")
+    q = qs_of(r.location)
+    assert "/login" in r.location and q["err"] == "switch" and q["user"] == "student02"
+    # 로그인 화면을 건너뛰고 바로 이어 가려 해도 막힌다
+    assert "/login" in get(client, f"/saml/continue?k={q['k']}").location
+    r = login(client, "student02", q["k"])
+    root, _, _ = saml_from(pass_mfa(client, get(client, r.location)))
+    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"student02@{D2}"
+
+
+def test_school_hint_mismatch_forces_login_without_prefill(client):
+    full_flow(client, D1, "multi01")
+    r = start_sso(client, D1, "_req2", username=f"student01@{D1}")
+    q = qs_of(r.location)
+    assert "/login" in r.location and q["err"] == "switch" and "user" not in q
+
+
+def test_matching_hint_reuses_session(client):
+    full_flow(client, D1, "multi01")
+    assert "/saml/continue" in start_sso(client, D1, "_req2", username=f"MULTI01@{D1}").location
+    assert "/saml/continue" in start_sso(client, DR, "_req3", username=f"multi01@{DR}").location
+
+
+def test_passive_request_with_other_user_returns_nopassive(client):
+    full_flow(client, D1, "student01")
+    root, _, _ = saml_from(start_sso(client, DR, "_req2", username=f"student02@{DR}", passive=True))
+    assert root.find(f".//{{{sc.NS_SAMLP}}}StatusCode/{{{sc.NS_SAMLP}}}StatusCode").get("Value") == sc.STATUS_NO_PASSIVE
+
+
+def test_force_authn_cannot_be_skipped(client):
+    full_flow(client, D1, "student01")
+    r = start_sso(client, D1, "_req9", force=True)
+    assert "/login" in get(client, f"/saml/continue?k={qs_of(r.location)['k']}").location

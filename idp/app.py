@@ -31,6 +31,7 @@ ID_SUFFIX = "@joowon.me"
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
 TOTP_STEP = 30
+VERSION = "2026-11-12.route-hint"
 
 
 def totp_at(secret_b32, counter, digits=6):
@@ -159,6 +160,18 @@ def create_app(overrides=None):
     def needs_mfa(user, domain):
         return bool(user.get("flags", {}).get("mfa") or domains.get(domain, {}).get("requireMfa"))
 
+    def hint_matches(uid, domain, hint):
+        """Entra가 넘긴 username(사용자가 입력한 아이디)이 지금 IdP 세션 사용자와 같은지."""
+        if domains.get(domain, {}).get("mode") == "route":
+            return hint.split("@")[0] == uid
+        return any(a["upn"].lower() == hint for a in users.get(uid, {}).get("accounts", []))
+
+    def prefill_for(domain, hint):
+        # 라우팅 도메인은 입력값의 앞부분이 곧 IdP 아이디. 학교 도메인은 아이디 노출을 막으려고 채우지 않는다.
+        if hint and domains.get(domain, {}).get("mode") == "route":
+            return hint.split("@")[0]
+        return None
+
     def check_totp(uid, secret, code):
         code = (code or "").strip().replace(" ", "")
         if not (len(code) == 6 and code.isdigit()):
@@ -196,7 +209,8 @@ def create_app(overrides=None):
 
     @app.get("/healthz")
     def healthz():
-        return {"ok": True, "activeSigning": cfg["ACTIVE_SIGNING"], "domains": sorted(domains), "time": sc.fmt(sc.utcnow())}
+        return {"ok": True, "version": VERSION, "activeSigning": cfg["ACTIVE_SIGNING"], "domains": sorted(domains),
+                "time": sc.fmt(sc.utcnow())}
 
     @app.get("/")
     def home():
@@ -231,6 +245,9 @@ def create_app(overrides=None):
         session.permanent = True
         session["uid"] = uid
         session["auth_time"] = sc.fmt(sc.utcnow())
+        if p:
+            with lock:
+                p["logged_in"] = True
         log("login_ok", uid=uid, ip=ip, pending=bool(p), via=request.headers.get("Origin") or "same-origin")
         if k and not p:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
@@ -258,20 +275,29 @@ def create_app(overrides=None):
             log("authn_request_invalid", domain=domain, binding=binding, error=str(e)[:200])
             return message("로그인 요청을 해석하지 못했습니다.", 400)
 
+        hint = (src.get("username") or src.get("login_hint") or "").strip().lower()
         log("authn_request", domain=domain, binding=binding, requestId=req["id"], sp=req["issuer"],
             forceAuthn=req["force_authn"], isPassive=req["is_passive"], signed=req["signed"],
             nameIdFormat=req["nameid_format"], paramKeys=sorted(src.keys()),
-            username=src.get("username") or src.get("login_hint"), relayStateLen=len(relay or ""),
+            username=hint or None, relayStateLen=len(relay or ""),
             userAgent=(request.headers.get("User-Agent") or "")[:120], hasSession=bool(session.get("uid")))
-        k = put_pending({"domain": domain, "request_id": req["id"], "relay": relay, "binding": binding})
+        uid = session.get("uid")
+        mismatch = bool(uid and hint and not hint_matches(uid, domain, hint))
+        need_login = not uid or req["force_authn"] or mismatch
+        k = put_pending({"domain": domain, "request_id": req["id"], "relay": relay, "binding": binding, "hint": hint,
+                         "needs_login": need_login})
 
-        if req["is_passive"] and not session.get("uid"):
+        if req["is_passive"] and need_login:
             xml = sc.build_status_response(issuer=issuer_for(domain), in_response_to=req["id"],
                                            second_level=sc.STATUS_NO_PASSIVE)
-            log("saml_no_passive", domain=domain, requestId=req["id"])
+            log("saml_no_passive", domain=domain, requestId=req["id"], mismatch=mismatch)
             return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": relay})
-        if not session.get("uid") or req["force_authn"]:
-            return to_login(k=k, school=domains[domain].get("schoolName"))
+        if mismatch:
+            # 공용 PC 등: 브라우저에 남은 다른 사용자의 세션으로 응답하지 않고, 입력한 아이디로 다시 로그인시킨다.
+            log("hint_mismatch", domain=domain, sessionUid=uid, hint=hint)
+            return to_login(k=k, err="switch", school=domains[domain].get("schoolName"), user=prefill_for(domain, hint))
+        if need_login:
+            return to_login(k=k, school=domains[domain].get("schoolName"), user=prefill_for(domain, hint))
         return redirect(url_for("saml_continue", k=k))
 
     @app.route("/saml/continue", methods=["GET", "POST"])
@@ -281,8 +307,8 @@ def create_app(overrides=None):
         if not p:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
         uid = session.get("uid")
-        if not uid or uid not in users:
-            return to_login(k=k, school=domains[p["domain"]].get("schoolName"))
+        if not uid or uid not in users or (p.get("needs_login") and not p.get("logged_in")):
+            return to_login(k=k, school=domains[p["domain"]].get("schoolName"), user=prefill_for(p["domain"], p.get("hint")))
         user = users[uid]
         dcfg = domains[p["domain"]]
         accounts = user.get("accounts", [])
@@ -322,7 +348,9 @@ def create_app(overrides=None):
             pending.pop(k, None)
         log("saml_response", uid=uid, requestDomain=p["domain"], targetDomain=target["domain"],
             routed=target["domain"] != p["domain"], upn=target["upn"], issuer=issuer, inResponseTo=p["request_id"],
-            signing=cfg["ACTIVE_SIGNING"], mfa=mfa_done, tamper=bool(flags.get("badSignature")))
+            signing=cfg["ACTIVE_SIGNING"], mfa=mfa_done, tamper=bool(flags.get("badSignature")),
+            typed=p.get("hint") or None,
+            typedOverridden=bool(p.get("hint") and not hint_matches(uid, p["domain"], p["hint"])))
         return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": p["relay"]})
 
     @app.route("/mfa", methods=["GET", "POST"])

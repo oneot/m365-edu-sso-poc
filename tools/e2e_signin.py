@@ -107,14 +107,18 @@ class Browser:
         self.totp = totp
 
     def sign_in(self, upn, *, domain_hint=None, prompt=None, idp_user=None, choose=None, tenant="organizations",
-                hint=True):
+                hint=True, pre_login=False):
+        """pre_login: 앱을 열기 전에 IdP(포털)에 먼저 로그인해 둔 상태를 만든다."""
+        idp_user = idp_user or upn.split("@")[0]
+        if pre_login:
+            self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
         verifier = secrets.token_urlsafe(48)
         params = {
             "client_id": CLIENT_ID, "response_type": "code", "redirect_uri": REDIRECT, "response_mode": "query",
             "scope": "openid profile offline_access", "state": secrets.token_hex(8), "nonce": secrets.token_hex(8),
             "code_challenge": b64url(hashlib.sha256(verifier.encode()).digest()), "code_challenge_method": "S256",
         }
-        if hint:
+        if hint and upn:
             params["login_hint"] = upn
         if domain_hint:
             params["domain_hint"] = domain_hint
@@ -122,7 +126,7 @@ class Browser:
             params["prompt"] = prompt
         trace = {"steps": [], "idpLogin": False}
         r = self.s.get(f"{AAD}/{tenant}/oauth2/v2.0/authorize?{urlencode(params)}", allow_redirects=False)
-        outcome = self._drive(r, upn, idp_user or upn.split("@")[0], choose, trace)
+        outcome = self._drive(r, upn, idp_user, choose, trace)
         if outcome.get("code"):
             tok = self.s.post(f"{AAD}/{tenant}/oauth2/v2.0/token", data={
                 "client_id": CLIENT_ID, "grant_type": "authorization_code", "code": outcome["code"],
@@ -317,8 +321,58 @@ SCENARIOS = [
      lambda b: b.portal_link("multi01", f"https://www.office.com/?auth=2&login_hint=multi01%40{D2}")),
     ("I1", "IdP 시작(포털 버튼) → Microsoft 365, 학교 A", "관찰", lambda b: b.idp_initiated("student01", D1, 0)),
     ("I2", "IdP 시작(포털 버튼) → Microsoft 365, 학교 B", "관찰", lambda b: b.idp_initiated("multi01", D2, 0)),
+    # --- ④ 라우팅 도메인 심층 ---
+    ("R5", "4번: 학교 B 테넌트를 지정한 앱(SharePoint 등)에 통합 아이디", "성공(학교 B)",
+     lambda b: b.sign_in(f"student02@{DR}", tenant=tenant_of(D2))),
+    ("R6", "4번: 라우팅 테넌트(학교 A)를 지정한 앱에 학교 B 학생 통합 아이디", "거부",
+     lambda b: b.sign_in(f"student02@{DR}", tenant=tenant_of(DR))),
+    ("R7", "4번: 공용 PC — student01이 IdP에 로그인된 브라우저에서 student02 통합 아이디 입력", "student02로 로그인",
+     lambda b: shared_pc(b)),
+    ("R8", "4번: 통합 아이디 로그인(무음 SSO 준비)", "성공(학교 B)", lambda b: b.sign_in(f"student02@{DR}")),
+    ("R8b", "무음 SSO(prompt=none) + 학교 계정 힌트", "성공(학교 B)",
+     lambda b: b.sign_in(f"student02@{D2}", prompt="none")),
+    ("R8c", "무음 SSO(prompt=none) + 힌트 없음", "성공(학교 B)",
+     lambda b: b.sign_in(None, prompt="none", idp_user="student02")),
+    ("R8a", "무음 SSO(prompt=none) + 통합 아이디 힌트", "관찰",
+     lambda b: b.sign_in(f"student02@{DR}", prompt="none")),
+    ("R9", "4번: 포털 링크용 domain_hint=라우팅 도메인(IdP에 이미 로그인)", "성공(학교 B), IdP 비밀번호 생략",
+     lambda b: b.sign_in(None, domain_hint=DR, idp_user="student02", pre_login=True)),
+    ("R10", "4번: 포털 링크 → Microsoft 365 웹, login_hint=통합 아이디", "성공(학교 B)",
+     lambda b: b.portal_link("student02", f"https://www.office.com/?auth=2&login_hint=student02%40{DR}")),
 ]
-FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2"}
+FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2",
+                 "R5", "R6", "R7", "R8", "R9", "R10"}
+
+
+def shared_pc(b):
+    """공용 PC: 앞 학생(student01)의 IdP 세션이 남은 브라우저에서 다음 학생이 자기 통합 아이디를 입력."""
+    first = b.sign_in(f"student01@{D1}")
+    out = b.sign_in(f"student02@{DR}")
+    out["steps"] = [f"앞 사용자 로그인: {first.get('user')}"] + out.get("steps", [])
+    return out
+
+
+def ok_user(user):
+    return lambda o: o.get("result") == "success" and (o.get("user") or "").lower() == user.lower()
+
+
+def ok_error(code=None):
+    return lambda o: o.get("result") in ("aad_error", "error", "token_error") and (
+        code is None or code in json.dumps(o, ensure_ascii=False))
+
+
+# 자동 판정. 없으면 '관찰'
+VERDICT = {
+    "A1": ok_user(f"student01@{D1}"), "A2": ok_user(f"student02@{D2}"), "A3": ok_user(f"teacher01@{D1}"),
+    "B1": ok_user(f"multi01@{D1}"), "B1b": ok_user(f"multi01@{D2}"), "B2a": ok_error("AADSTS50107"),
+    "B2b": ok_error("AADSTS500069"), "C1": ok_error(), "C1b": ok_error(), "C7": ok_user(f"mfa01@{D1}"),
+    "F0": ok_user(f"teacher01@{D1}"), "F1": ok_user(f"teacher01@{D1}"),
+    "R1": ok_user(f"student02@{D2}"), "R2": ok_user(f"student01@{D1}"), "R3": ok_user(f"multi01@{D2}"),
+    "R4": ok_user(f"student02@{D2}"), "P1": ok_user(f"student01@{D1}"), "P2": ok_user(f"multi01@{D2}"),
+    "R5": ok_user(f"student02@{D2}"), "R6": ok_error(), "R7": ok_user(f"student02@{D2}"),
+    "R8": ok_user(f"student02@{D2}"), "R8b": ok_user(f"student02@{D2}"), "R8c": ok_user(f"student02@{D2}"),
+    "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"),
+}
 
 
 def main():
@@ -351,10 +405,12 @@ def main():
         out.update({"id": sid, "desc": desc, "expect": expect, "seconds": round(time.time() - started, 1)})
         if out.get("tid"):
             out["tenant"] = schools.get(out["tid"], out["tid"])
+        check = VERDICT.get(sid)
+        out["verdict"] = "관찰" if check is None else ("통과" if check(out) else "실패")
         results.append(out)
         summary = (out.get("tenant") or out.get("aadsts") or out.get("message") or out.get("pgid") or out.get("url")
                    or out.get("errorDescription", "")[:160])
-        print(f"[{sid}] {desc}: {out.get('result')} {summary} {out.get('user') or ''} {out.get('app') or ''} "
+        print(f"[{sid}] ({out['verdict']}) {desc}: {out.get('result')} {summary} {out.get('user') or ''} {out.get('app') or ''} "
               f"(IdP 비밀번호 {'입력' if out.get('idpLogin') else '생략'}, IdP 2단계 {'예' if out.get('idpMfa') else '아니오'})")
         print("      " + " | ".join(out.get("steps", [])))
 

@@ -5,7 +5,8 @@
     <h1>로그인</h1>
     {% if school %}<p class="context">{{ school }} Microsoft 365에 로그인합니다.</p>{% endif %}
     {% if err == "1" %}<p class="alert" role="alert">아이디 또는 비밀번호가 맞지 않습니다.</p>
-    {% elif err == "locked" %}<p class="alert" role="alert">로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.</p>{% endif %}
+    {% elif err == "locked" %}<p class="alert" role="alert">로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.</p>
+    {% elif err == "switch" %}<p class="alert" role="alert">이 브라우저에 다른 사용자가 로그인되어 있습니다. 입력한 아이디로 다시 로그인해 주세요.</p>{% endif %}
     <form id="loginForm" method="post" action="{{ url_for('login') }}" autocomplete="on">
       <input type="hidden" name="k" id="k" value="{{ k }}">
       <label for="username">아이디</label>
