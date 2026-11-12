@@ -14,6 +14,7 @@ ACCOUNTS="${ACCOUNTS:-hack01 hack02 hack04}"
 PW="$(tr -d '\r\n' < "$PASSWORD_FILE")"
 TOTP="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k: v for k, v in d.items() if k.startswith("hack")}))' "$TOTP_FILE")"
 RUN="set -e
+export DEBIAN_FRONTEND=noninteractive PIP_DISABLE_PIP_VERSION_CHECK=1
 apt-get update -qq && apt-get install -y -qq --no-install-recommends tor git ca-certificates >/dev/null
 tor --RunAsDaemon 1 --SocksPort 9050 --Log 'notice file /tmp/tor.log'
 for i in \$(seq 1 150); do grep -q 'Bootstrapped 100' /tmp/tor.log 2>/dev/null && break; sleep 2; done

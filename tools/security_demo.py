@@ -153,12 +153,22 @@ def egress(proxies):
         return {"ip": None, "tor": None, "error": type(e).__name__}
 
 
+STS_MEANING = {
+    "53003": "조건부 액세스 정책으로 차단",
+    "53004": "위험 세션이라 MFA 등록이 막혀 차단",
+    "530032": "사용자 위험으로 차단",
+}
+
+
 def summarize(out):
     if out.get("result") == "success":
         return f"성공: {out.get('user')} 로그인됨"
+    sts = out.get("stsErrorCode") or (out.get("aadsts") or "").replace("AADSTS", "")
+    if sts:
+        return f"차단: AADSTS{sts} {STS_MEANING.get(str(sts), '')} ({out.get('pgid') or out.get('result')})".strip()
     code = out.get("aadsts") or out.get("pgid") or out.get("result")
     msg = (out.get("strServiceExceptionMessage") or out.get("sErrTxt") or out.get("errorDescription") or "")
-    return f"차단/중단: {code} {msg[:120]}".strip()
+    return f"중단: {code} {msg[:120]}".strip()
 
 
 def cmd_attack(a):
@@ -275,8 +285,9 @@ def cmd_report(a):
             pols = [f"{p['displayName']}={p['result']}" for p in s.get("appliedConditionalAccessPolicies", [])
                     if p["displayName"].startswith(DEMO) or p["result"] not in ("notApplied", "notEnabled")]
             st = s.get("status") or {}
+            reason = f" ({st.get('failureReason', '')[:70]})" if st.get("errorCode") else ""
             print(f"  로그인 {s['createdDateTime'][11:19]} {s.get('ipAddress')} {(s.get('location') or {}).get('countryOrRegion') or ''} "
-                  f"오류 {st.get('errorCode')} 위험 {s.get('riskLevelDuringSignIn')} {s.get('riskEventTypes_v2')} "
+                  f"오류 {st.get('errorCode')}{reason} 위험 {s.get('riskLevelDuringSignIn')} {s.get('riskEventTypes_v2')} "
                   f"CA {s.get('conditionalAccessStatus')} {pols}")
     try:
         alerts = g.get_all(f"/security/alerts_v2?$filter=createdDateTime ge {since}")
