@@ -53,18 +53,22 @@
 ## PoC 결과 (2026-11-12)
 
 자동 시험 `tools/e2e_signin.py`로 Microsoft 로그인부터 토큰 발급까지 실제 테넌트에서 확인했다.
-학교 A는 MFA 정책이 없는 테넌트, 학교 B는 조건부 액세스로 전체 사용자 MFA가 필수인 테넌트다.
+학교 A는 Microsoft 365 E5 데모 테넌트, 학교 B는 Microsoft 365 A5(Education) 데모 테넌트다. 두 테넌트 모두 기본적으로 MFA를 요구하지 않고,
+테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA로 MFA 필수다.
+
+> Microsoft 파트너·벤더 테넌트에는 Microsoft가 "Multifactor authentication for Microsoft partners and vendors" 조건부 액세스 정책(전체 사용자 MFA)을 자동으로 만든다.
+> 학교 A에는 이 정책에 활성 사용자 전체 동적 그룹(`ALL`) 제외가 이미 있었고, 학교 B에도 같은 제외를 추가해 기본 MFA를 껐다. 그다음 위 두 계정에만 사용자별 MFA를 켰다.
 
 | ID | 시나리오 | 결과 |
 |---|---|---|
 | A1 | 앱 시작(domain_hint) → 학교 A | 성공, 토큰 테넌트 = 학교 A |
-| A2 | 앱 시작(login_hint) → 학교 B | 성공(IdP 2단계 인증 후), 토큰 테넌트 = 학교 B |
+| A2 | 앱 시작(login_hint) → 학교 B | 성공, 토큰 테넌트 = 학교 B |
 | A3 | Microsoft 로그인 화면에 학교 아이디 직접 입력 | 성공 |
-| B1 → B1b | 겸임교사가 학교 A 로그인 뒤 같은 브라우저로 학교 B | 성공, 학교 B는 비밀번호 없이 2단계 인증만 |
+| B1 → B1b | 겸임교사가 학교 A 로그인 뒤 같은 브라우저로 학교 B | 성공, 학교 B는 비밀번호 입력 없이 바로 |
 | B2a | 등록 안 된 Issuer | 거부(AADSTS50107) |
 | B2b | 서명 변조 | 거부(AADSTS500069) |
 | C1 / C1b | Entra 쪽 ImmutableID 없음 | 거부(AADSTS90019 / 테넌트 지정 시 AADSTS90072) |
-| C7 | 계정 단위 2단계 인증(학교 A) | 성공 |
+| C7 / C8 | MFA 필수 계정(학교 A `mfa01`, 학교 B `mfa02`) | 성공. 이 두 계정만 IdP 2단계 인증을 거치고, 나머지 계정은 거치지 않음 |
 | F0 → F1 | 앱이 재인증(prompt=login) 요구 | IdP에 전달되지 않음, IdP 세션으로 바로 통과 |
 | R1 | ④ 통합 아이디 → 학교 B(다른 테넌트) | 성공, 토큰 테넌트 = 학교 B |
 | R2 | ④ 통합 아이디 → 학교 A(같은 테넌트) | 성공 |
@@ -78,7 +82,7 @@
 
 - Entra는 IdP에 HTTP POST로 요청한다. 요청은 서명이 없고 NameID 형식은 persistent이며 ForceAuthn이 없다. 폼 값은 `SAMLRequest`, `RelayState`, `username`(login_hint)이다.
 - 사용자 이름 입력 없이 조용히 로그인되면(앱·포털 시작 + IdP 세션) Microsoft의 [도메인 확인 대화상자](https://support.microsoft.com/en-us/office/domain-confirmation-dialog)가 한 번 뜬다. 아이디를 직접 입력하면 뜨지 않는다.
-- MFA 필수 테넌트에서 IdP가 MFA 수행 표시를 보내지 않으면 Entra MFA 등록 화면으로 넘어가 로그인이 끝나지 않는다. 표시를 보내면 Entra 로그인 로그에 "MFA requirement satisfied by claim in the token"이 남는다.
+- Entra가 MFA를 요구하는 계정(조건부 액세스 또는 사용자별 MFA)에 IdP가 MFA 수행 표시를 보내지 않으면 Entra MFA 등록 화면으로 넘어가 로그인이 끝나지 않는다. 표시를 보내면 Entra 로그인 로그에 "MFA requirement satisfied by claim in the token"이 남는다.
 - ④ 라우팅은 테넌트 A에 페더레이션한 도메인으로 시작한 로그인에 학교 B 도메인 Issuer로 답해도 학교 B로 로그인됐다. 문서에 없는 동작이므로 운영 채택 전에 Microsoft 확인이 필요하다.
 - `promptLoginBehavior`를 `nativeSupport`로 바꿔도 재인증 요구가 IdP에 전달되지 않았다. 재인증 주기는 IdP 세션 수명으로 통제해야 한다.
 - 인증서 교체는 next 사전 등록 → IdP 서명 전환 → 테넌트별 승격 순서로, 테넌트마다 시점을 맞추지 않아도 된다.
@@ -104,6 +108,7 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 | R9 | 포털 링크 `domain_hint=라우팅 도메인`(IdP 로그인 상태) | 성공, 비밀번호 입력 없음 |
 | R10 | Microsoft 365 웹 링크 `login_hint=통합 아이디` | 성공 |
 | R11 | 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답 | 거부(AADSTS5000820, Federated Token Validation) |
+| R12 | MFA 필수 계정(`mfa02`)이 통합 아이디로 로그인 | 성공, IdP 2단계 인증 후 학교 B |
 | 브라우저 | Outlook 웹(student02 → 학교 B), Teams 웹(multi01 → 학교 선택 → 학교 A), Microsoft 365 웹(포털 링크) | 모두 학교 계정으로 앱 진입(`tools/browser_route_demo.py`) |
 
 확인한 동작
@@ -179,6 +184,7 @@ python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --tot
 ## 정리
 
 1. `graph/Invoke-SenM365Federation.ps1 -Mode Rollback`으로 페더레이션 해제
-2. 테스트 계정·하위 도메인 삭제
-3. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
-4. DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`) 삭제
+2. 테스트 계정·하위 도메인 삭제, 사용자별 MFA 해제
+3. 학교 B 테넌트: 파트너·벤더 MFA 정책 2개의 `ALL` 그룹 제외를 되돌리고 그룹 삭제
+4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
+5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`) 삭제
