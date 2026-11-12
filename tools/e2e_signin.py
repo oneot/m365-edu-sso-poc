@@ -31,6 +31,7 @@ LOGIN_UI_HOSTS = {IDP_HOST, "login.joowon.me", "oneot.github.io"}
 # Chrome UA면 장치 SSO 확인 페이지(AADSTS50168)가 끼어들어 Firefox UA를 쓴다.
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0"
 D1, D2, DR = "school1.joowon.me", "school2.joowon.me", "id.joowon.me"
+DROOT = "joowon.me"  # IdP 아이디 도메인 자체를 라우팅 도메인으로(SEN의 @senedu.kr와 같은 형태)
 DOMAINS = {}  # main()에서 domains.json 을 읽어 채운다(테넌트 ID → 학교 이름)
 
 
@@ -345,9 +346,15 @@ SCENARIOS = [
      lambda b: b.sign_in(f"teacher01@{DR}")),
     ("R12", "4번: MFA 필수 계정의 통합 아이디 → 학교 B", "성공(학교 B), IdP 2단계 인증",
      lambda b: b.sign_in(f"mfa02@{DR}")),
+    ("R13", "4번: MS 로그인 화면에 IdP 아이디 그대로 입력(student01@joowon.me) → 학교 A", "성공(학교 A)",
+     lambda b: b.sign_in(f"student01@{DROOT}", hint=False)),
+    ("R14", "4번: IdP 아이디 그대로(student02@joowon.me) → 학교 B(다른 테넌트)", "성공(학교 B)",
+     lambda b: b.sign_in(f"student02@{DROOT}", hint=False)),
+    ("R15", "4번: 겸임교사 IdP 아이디 그대로(multi01@joowon.me) → 학교 B 선택", "성공(학교 B)",
+     lambda b: b.sign_in(f"multi01@{DROOT}", hint=False, choose=D2)),
 ]
 FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "C8", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2",
-                 "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12"}
+                 "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"}
 
 
 def shared_pc(b):
@@ -381,6 +388,7 @@ VERDICT = {
     "R8": ok_user(f"student02@{D2}"), "R8b": ok_user(f"student02@{D2}"), "R8c": ok_user(f"student02@{D2}"),
     "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"), "R11": ok_error("AADSTS5000820"),
     "R12": ok_user(f"mfa02@{D2}", mfa=True),
+    "R13": ok_user(f"student01@{D1}"), "R14": ok_user(f"student02@{D2}"), "R15": ok_user(f"multi01@{D2}"),
 }
 
 

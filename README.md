@@ -32,7 +32,7 @@
 - **테넌트 구분**: Microsoft는 모든 테넌트가 같은 SP 식별값(`urn:federation:MicrosoftOnline`)을 쓰고 요청에 사용자 정보가 없다. 그래서 IdP는 **로그인 주소의 도메인**으로 학교 테넌트를 구분한다.
 - **도메인별 Issuer**: Entra ID는 페더레이션 도메인마다 고유한 Issuer를 요구한다. IdP는 응답마다 `https://auth.joowon.me/saml/m365/<도메인>`을 Issuer로 쓴다.
 - **늘지 않는 것**: IdP 서버 대수, 서명 인증서(1개를 모든 도메인에 등록), Microsoft 쪽 SP 등록(1개).
-- **라우팅 실험**: `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
+- **라우팅 실험**: 루트 `joowon.me`(IdP 아이디 도메인, SEN의 `@senedu.kr` 역할)와 `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 둘 다 학교 A 테넌트(라우팅 테넌트 역할)에 페더레이션되어 있다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
 - **2단계 인증(TOTP)**: 계정에 `mfa` 플래그가 있으면(또는 학교 도메인에 `requireMfa: true`), IdP가 그 학교로 응답하기 전에 인증 앱 6자리 코드를 받는다(이미 통과한 세션은 생략, 같은 코드 재사용 불가). 실제로 통과한 세션에만 MFA 수행 표시(`multipleauthn`)를 넣는다.
 - **MFA 시나리오**: 테넌트는 기본적으로 MFA를 요구하지 않고, 테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA(`perUserMfaState: enforced`)로 MFA 필수다. IdP는 이 두 계정에만 2단계 인증을 하고 MFA 수행 표시를 보내 Entra의 요구를 충족한다.
 
@@ -109,6 +109,8 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 | R10 | Microsoft 365 웹 링크 `login_hint=통합 아이디` | 성공 |
 | R11 | 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답 | 거부(AADSTS5000820, Federated Token Validation) |
 | R12 | MFA 필수 계정(`mfa02`)이 통합 아이디로 로그인 | 성공, IdP 2단계 인증 후 학교 B |
+| R13 / R14 | Microsoft 로그인 화면에 IdP 아이디 그대로 입력(`student01@joowon.me`, `student02@joowon.me`) | 성공(학교 A / 학교 B), SEN 로그인 화면에 아이디가 미리 채워짐 |
+| R15 | 겸임교사 IdP 아이디 그대로(`multi01@joowon.me`) | 학교 선택 화면 뒤 성공(학교 B) |
 | 브라우저 | Outlook 웹(student02 → 학교 B), Teams 웹(multi01 → 학교 선택 → 학교 A), Microsoft 365 웹(포털 링크) | 모두 학교 계정으로 앱 진입(`tools/browser_route_demo.py`) |
 
 확인한 동작
@@ -184,7 +186,7 @@ python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --tot
 ## 정리
 
 1. `graph/Invoke-SenM365Federation.ps1 -Mode Rollback`으로 페더레이션 해제
-2. 테스트 계정·하위 도메인 삭제, 사용자별 MFA 해제
+2. 테스트 계정·도메인(`school1`·`school2`·`id` 하위 도메인, 루트 `joowon.me`) 삭제, 사용자별 MFA 해제
 3. 학교 B 테넌트: 파트너·벤더 MFA 정책 2개의 `ALL` 그룹 제외를 되돌리고 그룹 삭제
 4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
-5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`) 삭제
+5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…`) 삭제

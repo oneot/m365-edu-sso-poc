@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
 TOTP_STEP = 30
-VERSION = "2026-11-12.joowon"
+VERSION = "2026-11-12.joowon-root"
 
 
 def totp_at(secret_b32, counter, digits=6):
