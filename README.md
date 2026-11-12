@@ -49,6 +49,10 @@
 | `nomap01` | 학교 A | Entra 쪽 ImmutableID 없음 → 거부 |
 | `badissuer01` | 학교 A | 등록 안 된 Issuer → 거부 |
 | `badsig01` | 학교 A | 서명 변조 → 거부 |
+| `hack01` | 학교 B | 보안 데모 S1: 유출 계정으로 Tor 로그인 → 로그인 위험 정책(차단) |
+| `hack02` | 학교 B | 보안 데모 S2: Tor 로그인 + IdP 2단계 인증 → 로그인 위험 정책(MFA 요구) |
+| `hack04` | 학교 B | 보안 데모 S3: Tor 로그인, IdP 2단계 인증 없음 → 로그인 위험 정책(MFA 요구) |
+| `hack03` | 학교 B | 보안 데모 S4: 관리자 침해 확인 → 사용자 위험 정책(차단), CAE 세션 종료 |
 
 ## PoC 결과 (2026-11-12)
 
@@ -222,13 +226,14 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 
 ### 설계·운영 요구사항
 
-1. 고위험 로그인은 'MFA 요구'가 아니라 '차단'으로 설정한다. `federatedIdpMfaBehavior`가 `acceptIfMfaDoneByFederatedIdp`(이 PoC 설정)이면 IdP가 보낸 MFA 클레임이 Entra의 MFA 요구를 충족하므로, 위조 토큰에는 MFA 요구가 효과가 없다(Octo Tempest 기법).
+1. 고위험 로그인은 'MFA 요구'가 아니라 '차단'으로 설정한다. `federatedIdpMfaBehavior`가 `acceptIfMfaDoneByFederatedIdp`(이 PoC 설정)이면 IdP가 보낸 MFA 클레임이 Entra의 MFA 요구를 충족하므로, 위조 토큰에는 MFA 요구가 효과가 없다(Octo Tempest 기법). 보안 데모 S2에서 IdP MFA 클레임으로 위험 로그인이 통과하고 위험 탐지까지 자동 해소되는 것을 확인했다.
 2. 위험할 때 SEN IdP에 추가 인증을 요구하려면 `enforceMfaByFederatedIdp`와 SEN IdP의 추가 인증 처리가 필요하다(이 PoC에서 미검증).
 3. 비밀번호 기반 탐지(`Leaked credentials`, `Password spray`)는 비밀번호가 Entra에 없어 적용되지 않는다. 비밀번호 공격 방어는 SEN IdP가 맡는다.
-4. Microsoft 관리형 위험 정책은 P2 테넌트에 보고 전용으로 생성되고, 그대로 두면 30일 이후 자동으로 켜진다. 위험 로그인 정책은 MFA를 등록하지 않은 사용자의 위험 로그인을 차단하므로, SEN MFA 클레임이 없는 학생에게 미치는 영향을 보고 전용 기간에 확인한다.
+4. Microsoft 관리형 위험 정책은 P2 테넌트에 보고 전용으로 생성되고, 그대로 두면 30일 이후 자동으로 켜진다. 위험 로그인 정책은 MFA를 등록하지 않은 사용자의 위험 로그인을 차단하므로(보안 데모 S3), SEN MFA 클레임이 없는 학생에게 미치는 영향을 보고 전용 기간에 확인한다.
 5. P2 기능은 P2가 할당된 사용자에게 적용된다.
 6. 서명키는 정기적으로 교체하고(`nextSigningCertificate` 사전 등록 방식, 이 PoC에서 검증), 담당자가 바뀌면 폐기·재발급한다.
-7. 확인 필요
+7. A5 테넌트는 Defender 포털을 한 번 열어 Defender XDR을 켜고, Entra ID Protection 알림 수집을 'High and medium risk detections'로 바꾼다(기본값은 높음만). IdP MFA 클레임으로 위험이 해소되면 인시던트도 자동 종료되므로, 자동 종료된 익명 IP 인시던트도 검토한다(보안 데모 S5).
+8. 확인 필요
    - 학교 라이선스가 Microsoft 365 A3인지 Office 365 A3인지
    - AiTM 탐지의 문서상 요건(Microsoft 365 E5)이 A5에도 적용되는지
    - A5 학생 사용 혜택의 Defender for Office 365는 Plan 1이라 피싱 모의훈련 대상은 교직원
@@ -237,6 +242,48 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 
 - 위협: [Microsoft 디지털 방어 보고서 2025](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/bade/documents/products-and-services/en-us/security/Microsoft-Digital-Defense-Report-2025-v5-21Nov25.pdf)(p.17), [2026](https://aka.ms/Microsoft-Digital-Defense-Report-2026)(p.45·64·85), [Octo Tempest](https://www.microsoft.com/en-us/security/blog/2023/10/25/octo-tempest-crosses-boundaries-to-facilitate-extortion-encryption-and-destruction/), [Storm-0501(2024)](https://www.microsoft.com/en-us/security/blog/2024/09/26/storm-0501-ransomware-attacks-expanding-to-hybrid-cloud-environments/), [Storm-0501(2025)](https://www.microsoft.com/en-us/security/blog/2025/08/27/storm-0501s-evolving-techniques-lead-to-cloud-based-ransomware/), [쿠팡 조사 결과(과기정통부)](https://m.korea.kr/briefing/policyBriefingView.do?newsId=156744092), [교육부 2025 침해 통계](https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=105948&lev=0&searchType=null&statusYN=W&page=1&s=moe&m=020402&opType=N), [교육용 계정 집계(한국일보)](https://www.hankookilbo.com/news/article/A2026102217490005554), [PowerSchool(TechCrunch)](https://techcrunch.com/2025/01/17/malware-stole-internal-powerschool-passwords-from-engineers-hacked-computer/)
 - 기능·라이선스: [ID 보호 라이선스](https://learn.microsoft.com/en-us/entra/id-protection/overview-identity-protection), [위험 탐지 목록](https://learn.microsoft.com/en-us/entra/id-protection/concept-identity-protection-risks), [위험 기반 조건부 액세스](https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-risk-based-sign-in), [CAE](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation), [PIM 라이선스](https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals), [관리형 정책](https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies), [로그 보존](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention), [감사 활동 목록](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-audit-activities), [공격 자동 차단](https://learn.microsoft.com/en-us/defender-xdr/configure-attack-disruption), [Audit](https://learn.microsoft.com/en-us/purview/audit-solutions-overview), [교육용 A3](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-standard/standard-license)·[A5](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-advanced/advanced-license), [federatedIdpMfaBehavior](https://learn.microsoft.com/en-us/graph/api/resources/internaldomainfederation)
+
+## 보안 데모: 위험 로그인 탐지·차단(2026-11-12)
+
+학교 B 테넌트(Microsoft 365 A5, Entra ID P2 포함)에서 계정 유출을 가정한 로그인을 재현했다. 재현 방법은 Microsoft의 위험 시뮬레이션 방법(Tor 익명 IP, 관리자 침해 확인)을 따랐고, 데모용 조건부 액세스 정책은 데모 계정 그룹에만 적용했다. 익명 IP 탐지(위험 중간)가 확실히 정책에 걸리도록 데모 정책은 '낮음 이상'으로 두었다. 공격자는 SEN 아이디·비밀번호를 가진 것으로 가정하므로 SEN IdP 로그인은 모두 통과한다.
+
+| 계정 | 데모 정책(조건부 액세스) | 재현 |
+|---|---|---|
+| `hack01` | 로그인 위험 낮음 이상 → 차단 | Tor 경유 로그인 |
+| `hack02` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, IdP 2단계 인증까지 통과 |
+| `hack04` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, IdP 2단계 인증 없음 |
+| `hack03` | 사용자 위험 높음 → 차단 | 평소 위치에서 로그인해 CAE 토큰을 받은 뒤 관리자가 침해 확인 |
+
+| ID | 시나리오 | 결과 | Microsoft 쪽 기록 |
+|---|---|---|---|
+| S0 | 대조군: 평소 위치에서 4개 계정 로그인 | 모두 성공 | 로그인 위험 없음, 데모 정책 미적용 |
+| S1 | `hack01` Tor 로그인 | 차단(AADSTS53003) | ID 보호 `anonymizedIPAddress` 실시간 탐지(위험 중간) → S1 정책 `failure` |
+| S2 | `hack02` Tor 로그인 + IdP 2단계 인증 | 로그인 성공 | 같은 탐지. 'MFA 요구'가 IdP MFA 클레임으로 충족되고, 탐지 3건이 `remediated`(`userPassedMFADrivenByRiskBasedPolicy`)로 자동 해소돼 사용자 위험이 남지 않음 |
+| S3 | `hack04` Tor 로그인, IdP 2단계 인증 없음 | 차단(AADSTS53004) | 위험 세션이라 MFA 등록이 막힘 → 정책 `failure`, 사용자 위험 중간으로 남음 |
+| S4 | `hack03` 관리자 침해 확인 | 만료까지 24시간 남은 CAE 토큰이 8.6분 뒤 거부(401 claims challenge). 새 토큰·새 로그인 차단(AADSTS530032) | `adminConfirmedUserCompromised`(위험 높음) → CAE 중요 이벤트, S4 정책 |
+| S5 | Defender XDR(A5): S1~S3 알림·인시던트 | 공격 약 3분 뒤 'Anonymous IP address' 알림이 사용자별 인시던트로 생성됨. `hack01`·`hack04` 인시던트는 활성, `hack02` 인시던트 3건은 자동으로 '해결됨' | Entra ID Protection 알림(`azureAdIdentityProtection`, 위험 중간). `hack02`는 IdP MFA 클레임으로 위험이 해소돼 인시던트도 자동 종료 |
+
+확인한 동작
+
+- 익명 IP 탐지는 실시간이라 로그인 중에 정책이 적용된다. Entra는 SEN 로그인 뒤 SAML 응답을 보낸 브라우저의 IP(Tor 출구)로 위험을 평가한다.
+- Tor 로그인(S1·S3)에서 이 데모 테넌트의 Microsoft 관리형 위험 재인증 정책(파트너·벤더용, 보고 전용)이 `reportOnlyInterrupted`로 기록됐다. 켜져 있었다면 재인증을 요구했을 것이다. 학교 테넌트(P2, 보안 기본값 꺼짐)에는 같은 성격의 관리형 정책 'Multifactor authentication and reauthentication for risky sign-ins'가 보고 전용으로 생성된다.
+- IdP MFA 클레임은 위험 기반 'MFA 요구'를 충족하고 위험도 해소한다(S2). 그래서 고위험은 '차단'으로 설정한다(운영 보안 기준 요구사항 1).
+- 관리자 침해 확인 뒤 Microsoft Graph도 CAE로 기존 토큰을 거부했다(8.6분). 위험 반영과 CAE 전파에 수 분이 걸린다.
+- Defender XDR은 관리자가 Defender 포털에 처음 들어가면 켜진다(이 테넌트는 약 30분 걸림). Entra ID Protection 알림 수집 기본값은 '높음만'(2025-12-11부터)이라, 위험 '중간' 탐지(익명 IP 등)를 인시던트로 보려면 설정 → Microsoft Defender XDR → Alert service settings에서 'High and medium risk detections'로 바꿔야 한다.
+- IdP MFA 클레임으로 위험이 해소되면 Defender XDR 인시던트도 자동으로 '해결됨'이 된다(S2·S5). 활성 목록만 보면 놓치므로, 자동 해결된 익명 IP 인시던트도 검토 대상에 넣는다.
+- S1~S3는 3회 실행(Tor 출구 IP는 매번 다름) 모두 같은 결과였다.
+- 새 계정으로 재현할 수 없는 탐지: 처음 보는 로그인 환경(30일 이력 필요), 비정상 이동(14일·10회 이력 필요). 토큰 발급자 이상, AiTM, 공격 자동 차단은 안전하게 재현할 방법이 없다(Microsoft 문서: 그 밖의 탐지는 안전하게 시뮬레이션할 수 없음).
+
+발표 시연 순서
+
+1. Tor Browser(조직이 Tor를 제한하면 가상 머신)로 `https://myapps.microsoft.com` 접속 → `hack01@school2.joowon.me` → SEN 로그인 → 차단 화면
+2. Entra 관리 센터 → ID 보호 → 위험한 로그인·위험 탐지에서 익명 IP 탐지, 로그인 로그의 조건부 액세스 탭에서 S1 정책 `failure` 확인
+3. `hack02`로 같은 순서 → 로그인 성공, 위험 탐지가 '수정됨'으로 바뀐 것 확인(고위험을 '차단'으로 두는 이유)
+4. 터미널에서 `security_demo.py cae --confirm` 실행 → 수 분 뒤 401, 새 로그인 차단
+5. Defender 포털 → 인시던트에서 사용자별 'Anonymous IP address involving one user' 확인(`hack01`·`hack04` 활성, `hack02` 자동 해결)
+6. 끝나면 `security_demo.py reset`으로 데모 계정 위험 해제(S4를 다시 하려면 먼저 실행)
+
+근거: [위험 시뮬레이션](https://learn.microsoft.com/en-us/entra/id-protection/howto-identity-protection-simulate-risk), [위험 탐지 목록](https://learn.microsoft.com/en-us/entra/id-protection/concept-identity-protection-risks), [CAE](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation), [Defender XDR 켜기](https://learn.microsoft.com/en-us/defender-xdr/m365d-enable), [알림 서비스 설정](https://learn.microsoft.com/en-us/defender-xdr/investigate-alerts)
 
 ## 실행
 
@@ -272,6 +319,18 @@ python tools/e2e_signin.py --password-file ~/poc-test-password.txt --totp-file ~
 # ④ 실제 웹앱 브라우저 시연(헤드리스 Chrome, 임시 프로필, 단계별 화면 저장)
 pip install playwright
 python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json --out-dir out/route-demo
+
+# 보안 데모(학교 B). 필요한 관리자 권한은 tools/security_demo.py 머리말 참고(GRAPH_EXTRA_SCOPES)
+python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=M365EDU_A5_STUDENT \
+  --immutableid-csv out/immutableid.csv          # 페더레이션된 도메인에 데모 계정 생성
+python tools/security_demo.py setup              # 데모 그룹·조건부 액세스 정책
+python tools/security_demo.py attack --accounts hack01 hack02 hack03 hack04 \
+  --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json    # S0 대조군
+SUB=... RG=... PASSWORD_FILE=~/poc-test-password.txt TOTP_FILE=~/poc-totp.json \
+  tools/run_tor_attack.sh                        # S1~S3: Azure 컨테이너에서 Tor 경유 로그인(회사 기기에 Tor 설치 없음)
+python tools/security_demo.py cae --confirm --password-file ~/poc-test-password.txt   # S4
+python tools/security_demo.py report             # 위험 탐지·로그인 기록·Defender 알림
+python tools/security_demo.py reset              # 데모 계정 위험 해제
 ```
 
 페더레이션 설정은 `graph/README.md`를 참고합니다. 여러 테넌트를 다시 로그인하지 않고 처리하려면 `-AuthMode AccessToken -AccessTokenProvider { param($t) & ./.venv/bin/python ./tools/graph_token.py token $t }`를 씁니다.
@@ -289,3 +348,4 @@ python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --tot
 3. 학교 B 테넌트: 파트너·벤더 MFA 정책 2개의 `ALL` 그룹 제외를 되돌리고 그룹 삭제
 4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
 5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…`) 삭제
+6. 보안 데모: `security_demo.py reset`(위험 해제), `security_demo.py cleanup --delete-users`(데모 정책·그룹·계정 삭제). Defender XDR의 Entra ID Protection 알림 설정은 필요하면 기본값('High risk detections')으로 되돌린다.
