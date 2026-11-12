@@ -27,11 +27,10 @@ from werkzeug.security import check_password_hash
 import saml_core as sc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ID_SUFFIX = "@joowon.me"
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
 TOTP_STEP = 30
-VERSION = "2026-11-12.route-xdomain"
+VERSION = "2026-11-12.joowon"
 
 
 def totp_at(secret_b32, counter, digits=6):
@@ -62,6 +61,8 @@ def _env_config():
         return ""
     return {
         "IDP_BASE_URL": os.environ.get("IDP_BASE_URL", "https://auth.joowon.me").rstrip("/"),
+        # IdP 아이디의 도메인 표시(예: 학번@joowon.me). Entra 도메인과는 무관한 IdP 내부 아이디다.
+        "ID_DOMAIN": os.environ.get("IDP_ID_DOMAIN", "joowon.me"),
         "LOGIN_UI_URL": os.environ.get("LOGIN_UI_URL", "").strip(),
         "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
         "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
@@ -143,7 +144,12 @@ def create_app(overrides=None):
 
     def normalize_id(raw):
         v = (raw or "").strip().lower()
-        return v[: -len(ID_SUFFIX)] if v.endswith(ID_SUFFIX) else v
+        suffix = "@" + cfg["ID_DOMAIN"]
+        return v[: -len(suffix)] if v.endswith(suffix) else v
+
+    @app.context_processor
+    def template_globals():
+        return {"id_domain": cfg["ID_DOMAIN"]}
 
     def rate_limited(ip):
         now = time.time()

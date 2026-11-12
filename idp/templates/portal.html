@@ -5,7 +5,7 @@
   <div class="top">
     <div>
       <h1>{{ name }}님, 안녕하세요</h1>
-      <p class="sub">아이디 {{ uid }}@joowon.me 로 로그인했습니다. 아래 바로가기를 누르면 비밀번호 없이 각 학교 Microsoft 365로 들어갑니다.</p>
+      <p class="sub">아이디 {{ uid }}@{{ id_domain }} 로 로그인했습니다. 아래 바로가기를 누르면 비밀번호 없이 각 학교 Microsoft 365로 들어갑니다.</p>
     </div>
     <a class="btn ghost" href="{{ url_for('logout') }}">로그아웃</a>
   </div>

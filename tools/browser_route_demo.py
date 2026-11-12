@@ -21,6 +21,7 @@ from playwright.sync_api import sync_playwright
 from e2e_signin import totp_now
 
 ROUTE = "id.joowon.me"
+IDP_HOST, LOGIN_HOST = "auth.joowon.me", "login.joowon.me"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/157.0.0.0 Safari/537.36")
 FLOWS = {
@@ -100,7 +101,7 @@ def run_flow(pw, name, args, password, totp):
                                       "input[type=submit]", "button[type=submit]"]):
                     done.add("confirm")
                     continue
-        elif host == "login.joowon.me" and "idp-login" not in done and page.locator("#password").count():
+        elif host == LOGIN_HOST and "idp-login" not in done and page.locator("#password").count():
             prefilled = page.locator("#username").input_value()
             result["prefilled"] = prefilled
             shot("sen-login")
@@ -109,7 +110,7 @@ def run_flow(pw, name, args, password, totp):
             page.locator("#password").fill(password)
             page.locator("button[type=submit]").click()
             done.add("idp-login")
-        elif host == "auth.joowon.me":
+        elif host == IDP_HOST:
             if "choose" not in done and page.locator("button[name=domain]").count():
                 shot("sen-choose-school")
                 page.locator(f"button[name=domain][value='{choose}']").click()

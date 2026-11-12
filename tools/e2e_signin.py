@@ -25,8 +25,9 @@ import requests
 AAD = "https://login.microsoftonline.com"
 CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"  # Azure CLI(Microsoft 공개 클라이언트)
 REDIRECT = "http://localhost:8400"
-IDP = "https://auth.joowon.me"
-LOGIN_UI_HOSTS = {"auth.joowon.me", "login.joowon.me", "oneot.github.io"}
+IDP_HOST = "auth.joowon.me"
+IDP = f"https://{IDP_HOST}"
+LOGIN_UI_HOSTS = {IDP_HOST, "login.joowon.me", "oneot.github.io"}
 # Chrome UA면 장치 SSO 확인 페이지(AADSTS50168)가 끼어들어 Firefox UA를 쓴다.
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0"
 D1, D2, DR = "school1.joowon.me", "school2.joowon.me", "id.joowon.me"
@@ -175,11 +176,11 @@ class Browser:
                     return {"result": "error", "error": q.get("error", [""])[0],
                             "errorDescription": q.get("error_description", [""])[0][:400]}
                 lp = urlparse(loc)
-                if lp.netloc in LOGIN_UI_HOSTS and (lp.path.rstrip("/").endswith("/login") or lp.netloc != "auth.joowon.me"):
+                if lp.netloc in LOGIN_UI_HOSTS and (lp.path.rstrip("/").endswith("/login") or lp.netloc != IDP_HOST):
                     q = parse_qs(lp.query)
                     k = q.get("k", [None])[0]
                     api, origin = IDP, None
-                    if lp.netloc != "auth.joowon.me":
+                    if lp.netloc != IDP_HOST:
                         # GitHub Pages 로그인 화면: 화면을 받아 오고, 화면의 스크립트처럼 api/login 으로 전송
                         page = self.s.get(loc)
                         if page.status_code != 200 or 'id="loginForm"' not in page.text:
@@ -197,13 +198,13 @@ class Browser:
                     r = self.s.post(f"{api}/login", data=data, allow_redirects=False,
                                     headers={"Origin": origin, "Referer": loc} if origin else None)
                     continue
-                if stop_on_leave and lp.netloc not in ("login.microsoftonline.com", "auth.joowon.me"):
+                if stop_on_leave and lp.netloc not in ("login.microsoftonline.com", IDP_HOST):
                     return {"result": "landed", "url": f"{lp.scheme}://{lp.netloc}{lp.path}"}
                 r = self.s.get(loc, allow_redirects=False)
                 continue
 
             text = r.text
-            if host == "auth.joowon.me" and 'name="code"' in text and "2단계 인증" in text:
+            if host == IDP_HOST and 'name="code"' in text and "2단계 인증" in text:
                 form = first_form(text)
                 secret = self.totp.get(idp_user)
                 if not secret:
@@ -213,7 +214,7 @@ class Browser:
                 r = self.s.post(urljoin(r.url, form["action"]), data={**form["fields"], "code": totp_now(idp_user, secret)},
                                 allow_redirects=False)
                 continue
-            if host == "auth.joowon.me":
+            if host == IDP_HOST:
                 if "어느 학교로 로그인할까요" in text:
                     k = re.search(r'name="k" value="([^"]+)"', text).group(1)
                     options = re.findall(r'name="domain" value="([^"]+)"', text)
@@ -298,16 +299,17 @@ class Browser:
 SCENARIOS = [
     # (id, 설명, 기대, 실행 함수). 같은 브라우저를 이어 쓰는 시나리오는 FRESH_SESSION 에서 뺀다.
     ("A1", "학교 A 학생, domain_hint 로 바로 IdP", "성공(학교 A)", lambda b: b.sign_in(f"student01@{D1}", domain_hint=D1)),
-    ("A2", "학교 B 학생, 앱처럼 계정만 입력(학교 B는 2단계 인증 필요)", "성공(학교 B)", lambda b: b.sign_in(f"student02@{D2}")),
+    ("A2", "학교 B 학생, 앱처럼 계정만 입력", "성공(학교 B)", lambda b: b.sign_in(f"student02@{D2}")),
     ("A3", "MS 로그인 화면에 아이디 직접 입력(login_hint 없음)", "성공(학교 A)",
      lambda b: b.sign_in(f"teacher01@{D1}", hint=False)),
     ("B1", "겸임교사 학교 A 로그인", "성공(학교 A)", lambda b: b.sign_in(f"multi01@{D1}")),
-    ("B1b", "같은 브라우저로 학교 B", "성공(학교 B), 비밀번호 재입력 없이 2단계 인증만", lambda b: b.sign_in(f"multi01@{D2}")),
+    ("B1b", "같은 브라우저로 학교 B", "성공(학교 B), 비밀번호 재입력 없이", lambda b: b.sign_in(f"multi01@{D2}")),
     ("B2a", "등록 안 된 Issuer", "거부(AADSTS50107)", lambda b: b.sign_in(f"badissuer01@{D1}")),
     ("B2b", "서명 변조", "거부", lambda b: b.sign_in(f"badsig01@{D1}")),
     ("C1", "Entra 쪽 ImmutableID 없음(organizations 엔드포인트)", "거부", lambda b: b.sign_in(f"nomap01@{D1}")),
     ("C1b", "Entra 쪽 ImmutableID 없음(학교 A 테넌트 지정)", "거부", lambda b: b.sign_in(f"nomap01@{D1}", tenant=tenant_of(D1))),
-    ("C7", "IdP 2단계 인증 계정(mfa 플래그)", "성공(학교 A)", lambda b: b.sign_in(f"mfa01@{D1}")),
+    ("C7", "학교 A의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 A), IdP 2단계 인증", lambda b: b.sign_in(f"mfa01@{D1}")),
+    ("C8", "학교 B의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 B), IdP 2단계 인증", lambda b: b.sign_in(f"mfa02@{D2}")),
     ("F0", "교사 로그인", "성공(학교 A)", lambda b: b.sign_in(f"teacher01@{D1}")),
     ("F1", "같은 브라우저, 앱이 prompt=login(재인증) 요구", "관찰", lambda b: b.sign_in(f"teacher01@{D1}", prompt="login")),
     ("R1", "4번: 통합 아이디 → 학교 B(다른 테넌트)", "관찰", lambda b: b.sign_in(f"student02@{DR}")),
@@ -317,7 +319,7 @@ SCENARIOS = [
      lambda b: b.sign_in(f"student02@{DR}", hint=False)),
     ("P1", "IdP 포털 링크 → Microsoft 365 웹(학교 A)", "성공(학교 A)",
      lambda b: b.portal_link("student01", f"https://www.office.com/?auth=2&login_hint=student01%40{D1}")),
-    ("P2", "IdP 포털 링크 → Microsoft 365 웹(학교 B, 2단계 인증)", "성공(학교 B)",
+    ("P2", "IdP 포털 링크 → Microsoft 365 웹(학교 B)", "성공(학교 B)",
      lambda b: b.portal_link("multi01", f"https://www.office.com/?auth=2&login_hint=multi01%40{D2}")),
     ("I1", "IdP 시작(포털 버튼) → Microsoft 365, 학교 A", "관찰", lambda b: b.idp_initiated("student01", D1, 0)),
     ("I2", "IdP 시작(포털 버튼) → Microsoft 365, 학교 B", "관찰", lambda b: b.idp_initiated("multi01", D2, 0)),
@@ -341,9 +343,11 @@ SCENARIOS = [
      lambda b: b.portal_link("student02", f"https://www.office.com/?auth=2&login_hint=student02%40{DR}")),
     ("R11", "4번 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답(같은 테넌트 학교 A 계정)", "거부(AADSTS5000820)",
      lambda b: b.sign_in(f"teacher01@{DR}")),
+    ("R12", "4번: MFA 필수 계정의 통합 아이디 → 학교 B", "성공(학교 B), IdP 2단계 인증",
+     lambda b: b.sign_in(f"mfa02@{DR}")),
 ]
-FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2",
-                 "R5", "R6", "R7", "R8", "R9", "R10", "R11"}
+FRESH_SESSION = {"A1", "A2", "A3", "B1", "B2a", "B2b", "C1", "C1b", "C7", "C8", "F0", "R1", "R2", "R3", "R4", "P1", "P2", "I1", "I2",
+                 "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12"}
 
 
 def shared_pc(b):
@@ -354,8 +358,10 @@ def shared_pc(b):
     return out
 
 
-def ok_user(user):
-    return lambda o: o.get("result") == "success" and (o.get("user") or "").lower() == user.lower()
+def ok_user(user, mfa=False):
+    """성공 + 기대한 학교 계정 + IdP 2단계 인증 여부(MFA 필수 계정만 True)."""
+    return lambda o: (o.get("result") == "success" and (o.get("user") or "").lower() == user.lower()
+                      and bool(o.get("idpMfa")) == mfa)
 
 
 def ok_error(code=None):
@@ -367,13 +373,14 @@ def ok_error(code=None):
 VERDICT = {
     "A1": ok_user(f"student01@{D1}"), "A2": ok_user(f"student02@{D2}"), "A3": ok_user(f"teacher01@{D1}"),
     "B1": ok_user(f"multi01@{D1}"), "B1b": ok_user(f"multi01@{D2}"), "B2a": ok_error("AADSTS50107"),
-    "B2b": ok_error("AADSTS500069"), "C1": ok_error(), "C1b": ok_error(), "C7": ok_user(f"mfa01@{D1}"),
+    "B2b": ok_error("AADSTS500069"), "C1": ok_error(), "C1b": ok_error(), "C7": ok_user(f"mfa01@{D1}", mfa=True), "C8": ok_user(f"mfa02@{D2}", mfa=True),
     "F0": ok_user(f"teacher01@{D1}"), "F1": ok_user(f"teacher01@{D1}"),
     "R1": ok_user(f"student02@{D2}"), "R2": ok_user(f"student01@{D1}"), "R3": ok_user(f"multi01@{D2}"),
     "R4": ok_user(f"student02@{D2}"), "P1": ok_user(f"student01@{D1}"), "P2": ok_user(f"multi01@{D2}"),
     "R5": ok_user(f"student02@{D2}"), "R6": ok_error(), "R7": ok_user(f"student02@{D2}"),
     "R8": ok_user(f"student02@{D2}"), "R8b": ok_user(f"student02@{D2}"), "R8c": ok_user(f"student02@{D2}"),
     "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"), "R11": ok_error("AADSTS5000820"),
+    "R12": ok_user(f"mfa02@{D2}", mfa=True),
 }
 
 

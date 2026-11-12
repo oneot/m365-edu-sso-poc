@@ -76,7 +76,7 @@ def data_dir(tmp_path):
 
 
 def make_app(data_dir, **overrides):
-    cfg = {"DATA_DIR": data_dir, "KEYS": KEYS, "IDP_BASE_URL": BASE, "LOGIN_UI_URL": "", "SECRET_KEY": "s",
+    cfg = {"DATA_DIR": data_dir, "KEYS": KEYS, "IDP_BASE_URL": BASE, "LOGIN_UI_URL": "", "SECRET_KEY": "s", "ID_DOMAIN": "example.edu",
            "ADMIN_TOKEN": "admintoken", "ACTIVE_SIGNING": "current"}
     cfg.update(overrides)
     return create_app(cfg)
@@ -134,7 +134,7 @@ def k_from(location):
 
 
 def login(client, uid, k=None):
-    data = {"username": uid + "@joowon.me", "password": PW}
+    data = {"username": uid + "@example.edu", "password": PW}
     if k:
         data["k"] = k
     return post(client, "/login", data=data)

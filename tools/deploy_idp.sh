@@ -8,6 +8,7 @@
 #   SECRETS_FILE           SECRET_KEY, ADMIN_TOKEN 을 보관할 파일(없으면 새로 만든다)
 #   LOGIN_UI_URL           (선택) GitHub Pages 로그인 화면 주소. 비우면 서버 내장 로그인 화면 사용
 #   IDP_BASE_URL           (선택) 기본값 https://auth.joowon.me
+#   IDP_ID_DOMAIN          (선택) IdP 아이디 도메인 표시, 기본값 joowon.me
 set -euo pipefail
 : "${SUB:?}" "${RG:?}" "${APP:?}" "${KEYS_DIR:?}" "${SECRETS_FILE:?}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,7 +27,7 @@ b64() { base64 < "$1" | tr -d '\n'; }
 
 az webapp config appsettings set -g "$RG" -n "$APP" --subscription "$SUB" --output none --settings \
   SCM_DO_BUILD_DURING_DEPLOYMENT=true \
-  IDP_BASE_URL="${IDP_BASE_URL:-https://auth.joowon.me}" \
+  IDP_BASE_URL="${IDP_BASE_URL:-https://auth.joowon.me}" IDP_ID_DOMAIN="${IDP_ID_DOMAIN:-joowon.me}" \
   LOGIN_UI_URL="${LOGIN_UI_URL:-}" \
   ACTIVE_SIGNING="${ACTIVE_SIGNING:-current}" \
   SECRET_KEY="$SECRET_KEY" ADMIN_TOKEN="$ADMIN_TOKEN" \

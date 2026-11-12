@@ -32,8 +32,9 @@
 - **테넌트 구분**: Microsoft는 모든 테넌트가 같은 SP 식별값(`urn:federation:MicrosoftOnline`)을 쓰고 요청에 사용자 정보가 없다. 그래서 IdP는 **로그인 주소의 도메인**으로 학교 테넌트를 구분한다.
 - **도메인별 Issuer**: Entra ID는 페더레이션 도메인마다 고유한 Issuer를 요구한다. IdP는 응답마다 `https://auth.joowon.me/saml/m365/<도메인>`을 Issuer로 쓴다.
 - **늘지 않는 것**: IdP 서버 대수, 서명 인증서(1개를 모든 도메인에 등록), Microsoft 쪽 SP 등록(1개).
-- **라우팅 실험**: `id.joowon.me`은 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
-- **2단계 인증(TOTP)**: 학교 도메인에 `requireMfa: true`가 있거나 계정에 `mfa` 플래그가 있으면, IdP가 그 학교로 응답하기 전에 인증 앱 6자리 코드를 받는다(이미 통과한 세션은 생략, 같은 코드 재사용 불가). 실제로 통과한 세션에만 MFA 수행 표시(`multipleauthn`)를 넣는다.
+- **라우팅 실험**: `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
+- **2단계 인증(TOTP)**: 계정에 `mfa` 플래그가 있으면(또는 학교 도메인에 `requireMfa: true`), IdP가 그 학교로 응답하기 전에 인증 앱 6자리 코드를 받는다(이미 통과한 세션은 생략, 같은 코드 재사용 불가). 실제로 통과한 세션에만 MFA 수행 표시(`multipleauthn`)를 넣는다.
+- **MFA 시나리오**: 테넌트는 기본적으로 MFA를 요구하지 않고, 테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA(`perUserMfaState: enforced`)로 MFA 필수다. IdP는 이 두 계정에만 2단계 인증을 하고 MFA 수행 표시를 보내 Entra의 요구를 충족한다.
 
 ## 테스트 계정 역할
 
@@ -41,9 +42,10 @@
 |---|---|---|
 | `student01` | 학교 A | 기본 로그인 |
 | `teacher01` | 학교 A | 기본 로그인. 통합 아이디로 들어오면 일부러 라우팅 도메인 Issuer로 응답(R11) |
-| `student02` | 학교 B | 기본 로그인(학교 B는 2단계 인증 필요) |
+| `student02` | 학교 B | 기본 로그인 |
 | `multi01` | 학교 A·B | 두 학교 SSO, 라우팅 시 학교 선택 |
-| `mfa01` | 학교 A | 계정 단위 2단계 인증 → MFA 수행 표시(`multipleauthn`) |
+| `mfa01` | 학교 A | 학교 A의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증) |
+| `mfa02` | 학교 B | 학교 B의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증) |
 | `nomap01` | 학교 A | Entra 쪽 ImmutableID 없음 → 거부 |
 | `badissuer01` | 학교 A | 등록 안 된 Issuer → 거부 |
 | `badsig01` | 학교 A | 서명 변조 → 거부 |

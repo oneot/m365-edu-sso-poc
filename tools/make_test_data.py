@@ -30,7 +30,8 @@ ACCOUNTS = [
      "기본 시나리오(학교 A). 통합 아이디로 들어오면 라우팅 도메인 Issuer로 응답(R11, 교차 도메인 차단 확인)"),
     ("student02", "학생02", "학생", ["B"], {}, True, "기본 시나리오(학교 B)"),
     ("multi01", "겸임교사01", "교사", ["A", "B"], {}, True, "두 학교 소속(B-4, 라우팅 학교 선택)"),
-    ("mfa01", "MFA학생01", "학생", ["A"], {"mfa": True}, True, "IdP가 MFA 수행 표시(C-7)"),
+    ("mfa01", "MFA학생01", "학생", ["A"], {"mfa": True}, True, "학교 A의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증)"),
+    ("mfa02", "MFA학생02", "학생", ["B"], {"mfa": True}, True, "학교 B의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증)"),
     ("nomap01", "미매핑01", "학생", ["A"], {"skipImmutableId": True}, False, "Entra 쪽 ImmutableID 없음(C-1)"),
     ("badissuer01", "잘못된발급자01", "학생", ["A"], {"badIssuer": True}, False, "등록 안 된 Issuer(B-2)"),
     ("badsig01", "서명변조01", "학생", ["A"], {"badSignature": True}, False, "서명 변조(B-2)"),
@@ -43,6 +44,7 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--password-file", required=True)
     ap.add_argument("--totp-file")
+    ap.add_argument("--id-domain", default="joowon.me", help="IdP 아이디 도메인 표시(인증 앱 계정 이름에 사용)")
     args = ap.parse_args()
 
     domains = json.load(open(args.domains, encoding="utf-8"))
@@ -85,7 +87,7 @@ def main():
         if flags.get("mfa") or any(domains[a["domain"]].get("requireMfa") for a in accounts):
             secret = old.get(uid, {}).get("totpSecret") or base64.b32encode(secrets.token_bytes(20)).decode()
             users[uid]["totpSecret"] = secret
-            totp[uid] = (f"otpauth://totp/{quote('SSO PoC')}:{uid}%40joowon.me"
+            totp[uid] = (f"otpauth://totp/{quote('SSO PoC')}:{uid}%40{args.id_domain}"
                          f"?secret={secret}&issuer={quote('SSO PoC')}&digits=6&period=30")
 
     with open(users_path, "w", encoding="utf-8") as f:

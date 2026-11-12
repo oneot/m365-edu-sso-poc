@@ -30,6 +30,9 @@ SCOPES = [
         "LicenseAssignment.ReadWrite.All",
     )
 ]
+# 추가 권한(쉼표 구분, 예: Policy.ReadWrite.AuthenticationMethod). 필요한 테넌트에서만 켠다.
+SCOPES += ["https://graph.microsoft.com/" + s.strip()
+           for s in os.environ.get("GRAPH_EXTRA_SCOPES", "").split(",") if s.strip()]
 # 토큰 캐시(암호화 저장). 경로는 MSAL_CACHE_PATH 로 바꿀 수 있다.
 CACHE_PATH = os.environ.get("MSAL_CACHE_PATH") or os.path.expanduser("~/.m365-edu-sso-poc/msal_cache.bin")
 GRAPH = "https://graph.microsoft.com/v1.0"
