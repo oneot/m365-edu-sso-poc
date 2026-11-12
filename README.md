@@ -87,7 +87,9 @@
 - `promptLoginBehavior`를 `nativeSupport`로 바꿔도 재인증 요구가 IdP에 전달되지 않았다. 재인증 주기는 IdP 세션 수명으로 통제해야 한다.
 - 인증서 교체는 next 사전 등록 → IdP 서명 전환 → 테넌트별 승격 순서로, 테넌트마다 시점을 맞추지 않아도 된다.
 
-남은 확인(사람이 직접): Teams·Office 데스크톱/모바일 앱 로그인, 조건부 액세스 로그인 빈도, 로그아웃(SLO).
+앱 확인(사람이 직접): Teams·Outlook 앱 로그인 정상.
+
+남은 확인: Windows 기기 로그인(아래 'Windows 기기 로그인' 절), 조건부 액세스 로그인 빈도, 로그아웃(SLO).
 
 ## ④ 라우팅 도메인 심층 PoC (2026-11-12)
 
@@ -133,11 +135,28 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 1. 응답 Issuer는 반드시 학생 학교 도메인의 Issuer(R11).
 2. Entra가 넘기는 `username`을 세션 사용자와 비교(R7).
 3. 학교가 여럿이면 학교 선택 화면(R3).
-4. 라우팅 테넌트에는 도메인 인증·페더레이션만 필요하고 사용자·라이선스는 필요 없다.
+4. 라우팅 테넌트에는 도메인 인증·페더레이션만 필요하고 사용자는 필요 없다.
 5. 학교별 도메인 페더레이션(기본안)은 그대로 필요하다. ④는 그 위의 편의 계층이고, 끄면 학교 계정 입력으로 돌아간다.
 6. 운영 전 Microsoft 지원 범위 확인, AADSTS5000820·50107 모니터링.
 
-남은 확인(사람이 직접): Teams·Outlook·OneDrive 데스크톱/모바일과 Windows WAM에 통합 아이디 입력.
+남은 확인(사람이 직접): OneDrive 앱, Windows 로그인 화면에 통합 아이디 입력.
+
+## Windows 기기 로그인(PoC 미시험)
+
+SAML 2.0 IdP 계정으로 Windows 11에 로그인할 수 있다. 다만 **기기 가입은 SAML로 할 수 없고**, Windows 판·가입 방식 조건이 있다. 이 PoC는 Windows 기기에서 시험하지 않았다.
+
+| 항목 | 공식 문서 내용 | 이 설계에서 |
+|---|---|---|
+| 기기 가입 | 페더레이션 계정으로 기기를 Entra에 가입하는 프로토콜은 WS-Fed만 지원. SAML IdP는 프로비저닝 패키지(PPKG)나 Autopilot 자체 배포 모드로 가입 | 학생이 첫 설정 화면에서 SEN 계정으로 직접 가입하는 방식은 불가. 학교·교육청이 일괄 가입 |
+| 1인 1기기 | Federated sign-in. Windows 11 Education·Pro Education 22H2(KB5022913) 이상, Windows 11 SE | 공유 PC 모드, '마지막 로그인 사용자 표시 안 함', Take a Test 키오스크와 함께 쓸 수 없음 |
+| 공용 기기 | Web sign-in. Windows 11 22H2(KB5030310) 이상, **Entra 가입 기기만**(하이브리드·도메인 가입 불가). Pro·Enterprise·Education 모두 지원 | 페더레이션되지 않은 계정(로컬 계정 포함)은 로그인 불가. 프로필 자동 삭제 정책 권장 |
+| 공통 설정 | `ConfigureWebSignInAllowedUrls`에 IdP 도메인 등록. 선호 테넌트(`PreferredAadTenantDomainName`)를 넣으면 계정 선택 화면 생략 | 학교 기기마다 자기 학교 도메인을 선호 테넌트로 설정 |
+| 계정 일치 | IdP가 보낸 ImmutableID로 Entra 사용자를 찾음(대소문자 구분). 페더레이션 사용자의 값을 바꾸려면 클라우드 전용으로 돌렸다가 다시 페더레이션 | PoC와 같은 조건 |
+| Windows 11 SE | 2026년 10월 지원 종료 | SE 기기는 교체 계획 필요 |
+
+시험할 것: 학교 계정·통합 아이디(④)로 로그인 화면 진입, 공용 PC에서 학생 교대 로그인, Windows Hello for Business 등록 뒤 로그인, 로그아웃 뒤 IdP 세션 처리.
+
+근거: [Configure federated sign-in for Windows devices](https://learn.microsoft.com/en-us/education/windows/federated-sign-in), [Web sign-in for Windows](https://learn.microsoft.com/en-us/windows/security/identity-protection/web-sign-in/)
 
 ## 실행
 
