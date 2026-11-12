@@ -43,6 +43,22 @@ fi
 PKG="$(mktemp -d)/idp.zip"
 (cd "$IDP" && zip -qr "$PKG" app.py wsgi.py saml_core.py requirements.txt templates static data \
   -x '*/__pycache__/*' 'data/*.sample.json')
-az webapp deploy -g "$RG" -n "$APP" --subscription "$SUB" --src-path "$PKG" --type zip --output none
+# az webapp deploy 는 기본 구독의 테넌트 토큰으로 Kudu를 호출해 403이 날 수 있어, 대상 구독 토큰으로 직접 배포한다.
+TOKEN="$(az account get-access-token --subscription "$SUB" --query accessToken -o tsv)"
+SCM="https://$(az webapp show -g "$RG" -n "$APP" --subscription "$SUB" --query "enabledHostNames[?contains(@, '.scm.')] | [0]" -o tsv)"
+latest() { curl -s -H "Authorization: Bearer $TOKEN" "$SCM/api/deployments/latest" |
+           python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id"), d.get("status"), d.get("complete"))' 2>/dev/null || true; }
+before="$(latest | cut -d' ' -f1)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" \
+  --data-binary @"$PKG" "$SCM/api/publish?type=zip&async=true")
 rm -f "$PKG"
+case "$code" in 200|202) ;; *) echo "배포 요청 실패: HTTP $code"; exit 1;; esac
+for _ in $(seq 1 120); do
+  read -r id status complete <<< "$(latest)"
+  if [ -n "$id" ] && [ "$id" != "$before" ] && [ "$complete" = "True" ]; then
+    [ "$status" = 4 ] && break
+    echo "배포 실패: $SCM/api/deployments/$id"; exit 1
+  fi
+  sleep 5
+done
 echo "배포 완료: ${IDP_BASE_URL:-https://auth.joowon.me}/healthz"

@@ -90,7 +90,7 @@ def first_form(text):
 
 
 def error_info(cfg):
-    keys = ("iErrorCode", "sErrorCode", "strServiceExceptionMessage", "sErrTxt", "strMainMessage")
+    keys = ("iErrorCode", "sErrorCode", "strServiceExceptionMessage", "sErrTxt", "strMainMessage", "correlationId")
     info = {k: cfg.get(k) for k in keys if cfg.get(k)}
     msg = str(cfg.get("strServiceExceptionMessage") or "")
     code = re.search(r"AADSTS\d+", msg)
@@ -109,17 +109,20 @@ class Browser:
         self.totp = totp
 
     def sign_in(self, upn, *, domain_hint=None, prompt=None, idp_user=None, choose=None, tenant="organizations",
-                hint=True, pre_login=False):
-        """pre_login: 앱을 열기 전에 IdP(포털)에 먼저 로그인해 둔 상태를 만든다."""
+                hint=True, pre_login=False, scope="openid profile offline_access", claims=None, keep_tokens=False):
+        """pre_login: 앱을 열기 전에 IdP(포털)에 먼저 로그인해 둔 상태를 만든다.
+        claims: 클라이언트 기능 선언 등 claims 요청(예: CAE의 cp1). keep_tokens: 결과에 토큰을 담는다."""
         idp_user = idp_user or upn.split("@")[0]
         if pre_login:
             self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
         verifier = secrets.token_urlsafe(48)
         params = {
             "client_id": CLIENT_ID, "response_type": "code", "redirect_uri": REDIRECT, "response_mode": "query",
-            "scope": "openid profile offline_access", "state": secrets.token_hex(8), "nonce": secrets.token_hex(8),
+            "scope": scope, "state": secrets.token_hex(8), "nonce": secrets.token_hex(8),
             "code_challenge": b64url(hashlib.sha256(verifier.encode()).digest()), "code_challenge_method": "S256",
         }
+        if claims:
+            params["claims"] = claims
         if hint and upn:
             params["login_hint"] = upn
         if domain_hint:
@@ -130,12 +133,16 @@ class Browser:
         r = self.s.get(f"{AAD}/{tenant}/oauth2/v2.0/authorize?{urlencode(params)}", allow_redirects=False)
         outcome = self._drive(r, upn, idp_user, choose, trace)
         if outcome.get("code"):
-            tok = self.s.post(f"{AAD}/{tenant}/oauth2/v2.0/token", data={
-                "client_id": CLIENT_ID, "grant_type": "authorization_code", "code": outcome["code"],
-                "redirect_uri": REDIRECT, "code_verifier": verifier, "scope": "openid profile offline_access"}).json()
+            data = {"client_id": CLIENT_ID, "grant_type": "authorization_code", "code": outcome["code"],
+                    "redirect_uri": REDIRECT, "code_verifier": verifier, "scope": scope}
+            if claims:
+                data["claims"] = claims
+            tok = self.s.post(f"{AAD}/{tenant}/oauth2/v2.0/token", data=data).json()
             if "id_token" in tok:
                 c = jwt_claims(tok["id_token"])
                 outcome = {"result": "success", "tid": c.get("tid"), "user": c.get("preferred_username"), "name": c.get("name")}
+                if keep_tokens:
+                    outcome["tokens"] = {k: tok.get(k) for k in ("access_token", "refresh_token", "expires_in")}
             else:
                 outcome = {"result": "token_error", "error": tok.get("error"), "desc": (tok.get("error_description") or "")[:200]}
         outcome["steps"] = trace["steps"]

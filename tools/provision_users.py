@@ -5,12 +5,14 @@ ImmutableID는 넣지 않는다. 페더레이션 전에 graph/Invoke-SenM365Fede
 도메인이 관리형일 때만 의미가 있다(원복 대비).
 --rename 옛도메인=새도메인: 새 UPN 계정이 없고 옛 UPN 계정이 있으면 새로 만들지 않고 UPN만 바꾼다
 (메일함·Teams·ImmutableID 유지).
+--immutableid-csv: 이미 페더레이션된 도메인에 계정을 새로 만들 때는 ImmutableID가 필수라, 생성 시 함께 넣는다.
 
 사용: python provision_users.py --users ../out/entra-users.json \
         --skus <tenantId>=<skuPartNumber>[,<skuPartNumber>] [--skus ...] [--usage-location KR] \
-        [--password-file <파일>] [--rename old.example.edu=new.example.edu]
+        [--password-file <파일>] [--rename old.example.edu=new.example.edu] [--immutableid-csv ../out/immutableid.csv]
 """
 import argparse
+import csv
 import json
 import secrets
 import string
@@ -33,9 +35,14 @@ def main():
     ap.add_argument("--usage-location", default="KR")
     ap.add_argument("--password-file")
     ap.add_argument("--rename", action="append", default=[], help="옛도메인=새도메인")
+    ap.add_argument("--immutableid-csv", help="새 계정 생성 시 넣을 ImmutableID(UserPrincipalName, ImmutableId 열)")
     args = ap.parse_args()
     password = open(args.password_file, encoding="utf-8").read().strip() if args.password_file else None
     renames = dict(x.split("=", 1) for x in args.rename)
+    immutable = {}
+    if args.immutableid_csv:
+        with open(args.immutableid_csv, encoding="utf-8-sig") as f:
+            immutable = {r["UserPrincipalName"].lower(): r["ImmutableId"] for r in csv.DictReader(f)}
 
     sku_map = {}
     for item in args.skus:
@@ -74,16 +81,19 @@ def main():
                     except RuntimeError as e:  # 기존 계정 비밀번호 재설정은 User-PasswordProfile 권한이 필요할 수 있음
                         action += f", 비밀번호 재설정 건너뜀({str(e).split(':')[0].split('-> ')[-1]})"
             else:
-                user = g.call("POST", "/users", {
+                body = {
                     "accountEnabled": True,
                     "displayName": r["displayName"],
                     "mailNickname": r["mailNickname"],
                     "userPrincipalName": upn,
                     "usageLocation": args.usage_location,
                     "passwordProfile": {"password": password or random_password(), "forceChangePasswordNextSignIn": False},
-                })
+                }
+                if upn.lower() in immutable:
+                    body["onPremisesImmutableId"] = immutable[upn.lower()]
+                user = g.call("POST", "/users", body)
                 user["assignedLicenses"] = []
-                action = "생성"
+                action = "생성" + (", ImmutableID 지정" if "onPremisesImmutableId" in body else "")
             lic = ""
             if r.get("licensed") and wanted:
                 have = {l["skuId"] for l in user.get("assignedLicenses", [])}

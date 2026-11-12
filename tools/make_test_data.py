@@ -35,6 +35,12 @@ ACCOUNTS = [
     ("nomap01", "미매핑01", "학생", ["A"], {"skipImmutableId": True}, False, "Entra 쪽 ImmutableID 없음(C-1)"),
     ("badissuer01", "잘못된발급자01", "학생", ["A"], {"badIssuer": True}, False, "등록 안 된 Issuer(B-2)"),
     ("badsig01", "서명변조01", "학생", ["A"], {"badSignature": True}, False, "서명 변조(B-2)"),
+    # 보안 데모(학교 B, Microsoft 365 A5): 계정이 유출됐다고 가정하고 위험 기반 탐지·차단을 재현한다
+    ("hack01", "보안데모01", "학생", ["B"], {}, True, "보안 데모 S1: 유출 계정으로 Tor 로그인 → 로그인 위험 정책(차단)"),
+    ("hack02", "보안데모02", "학생", ["B"], {"mfa": True}, True,
+     "보안 데모 S2: Tor 로그인 + 로그인 위험 정책(MFA 요구), IdP 2단계 인증 클레임으로 충족되는지 확인"),
+    ("hack03", "보안데모03", "학생", ["B"], {}, True, "보안 데모 S4: 관리자 침해 확인 → 사용자 위험 정책(차단)·CAE 세션 종료"),
+    ("hack04", "보안데모04", "학생", ["B"], {}, True, "보안 데모 S3: Tor 로그인 + 로그인 위험 정책(MFA 요구), IdP 2단계 인증 없음"),
 ]
 
 
