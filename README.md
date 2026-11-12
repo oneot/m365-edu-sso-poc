@@ -158,6 +158,86 @@ SAML 2.0 IdP 계정으로 Windows 11에 로그인할 수 있다. 다만 **기기
 
 근거: [Configure federated sign-in for Windows devices](https://learn.microsoft.com/en-us/education/windows/federated-sign-in), [Web sign-in for Windows](https://learn.microsoft.com/en-us/windows/security/identity-protection/web-sign-in/)
 
+## 운영 보안 기준(Microsoft 쪽)
+
+학교 테넌트 약 1,400개(계정 약 100만 개)를 IdP 하나에 페더레이션해 운영할 때 Microsoft 쪽에 갖출 보안 기준이다. SEN IdP 자체의 보안(자격 증명 보호, MFA, 서명키 보관)은 IdP 쪽 기준으로 따로 정한다.
+
+### 신뢰 구조의 변화
+
+| 항목 | 현재(학교별 Entra 계정) | 페더레이션 이후 |
+|---|---|---|
+| 자격 증명 확인 | 학교 테넌트의 Entra ID | SEN IdP |
+| Entra의 신뢰 근거 | 비밀번호·MFA를 직접 확인 | SEN 서명키로 서명된 SAML 토큰(Issuer, ImmutableID, MFA 클레임) |
+| Entra가 보는 신호 | 비밀번호 시도, 토큰, 로그인 환경 | 토큰, 로그인 환경(IP·기기·위치). 비밀번호 시도는 보이지 않음 |
+| 침해 영향 범위 | 계정·학교 단위 | 서명키나 IdP가 침해되면 페더레이션된 전 학교 테넌트 |
+
+| 구분 | SEN IdP | Entra ID(학교 테넌트) |
+|---|---|---|
+| 인증 | 자격 증명 확인, MFA, 비밀번호 공격 방어 | IdP 토큰 검증(서명, Issuer, 도메인 일치) |
+| 키·설정 | 서명키 보관·교체·폐기 | 페더레이션 설정 보호(관리자 권한 통제, 변경 감시) |
+| 탐지·대응 | IdP 로그인 이상 탐지 | 토큰·로그인 위험 탐지, 위험 기반 차단, 세션 폐기 |
+
+### 위협 근거(공개 자료)
+
+| 위협 | 근거 |
+|---|---|
+| 서명키 탈취·토큰 위조 | Microsoft 디지털 방어 보고서 2025: 신원 보안에서 가장 치명적인 시나리오는 서명키 탈취다. 쿠팡(과기정통부 조사 결과, 2026.2): 인증시스템 서명키로 인증 토큰을 위·변조해 3,367만 건이 유출됐다. 관문 서버에 위·변조 검증 절차가 없었고, 퇴사자 키 갱신 절차가 미비했다 |
+| 페더레이션 설정 악용 | Octo Tempest(2023), Storm-0501(2024·2025): 관리자 권한으로 페더레이션 도메인을 추가·변경한 뒤, MFA 충족 클레임을 넣은 위조 SAML 토큰으로 임의 사용자로 로그인했다. Storm-0501은 ImmutableID로 대상 사용자를 지정했다 |
+| 토큰 탈취·AiTM 피싱 | 디지털 방어 보고서 2026: 2026년 상반기 AiTM 피싱·토큰 탈취 비중이 두 배 이상 늘었고, AiTM이 피싱 기법의 44.6%다 |
+| 교육 분야 계정 탈취 | 교육부: 2025년 교육기관 사이버침해 86,738건(전년 대비 36% 증가). 2026년 9~10월 477개 교육기관의 교육용 계정 11.3만 개가 정확한 아이디·비밀번호 로그인으로 탈취됐다(교육부 집계, 보도). PowerSchool(2024.12): MFA 없는 지원 포털 계정 하나로 학생 정보가 대량 유출됐다. 디지털 방어 보고서 2026: 공공 부문 중 연구·교육이 최다 표적이다(38%) |
+
+### 위협별 통제
+
+| 위협 | 통제 | 기준 |
+|---|---|---|
+| 서명키 탈취·토큰 위조 | ID 보호 `Token issuer anomaly`(SAML 토큰 발급자 침해 징후) → 사용자 위험 → 위험 기반 조건부 액세스로 차단. 사용자 위험이 높으면 CAE 지원 클라이언트에서 Exchange·SharePoint·Teams 접근이 수 분 안에 끊긴다 | P2 |
+| 유출 자격 증명으로 IdP 통과 | `Unfamiliar sign-in properties`·`Atypical travel`·`Verified threat actor IP`(실시간), `Malicious IP address` → 로그인 위험 정책으로 차단 | P2 |
+| 세션 토큰 재사용 | `Anomalous token` → 차단·세션 폐기 | P2 |
+| 학교 관리자 계정 탈취 → 페더레이션 변경 | PIM(상시 관리자 권한 없음, 승인·시간 제한 활성화). 감사 로그 `Set domain authentication`·`Set federation settings on domain`·`Verify domain` 감시 | P2 |
+| 약 1,400개 테넌트 관제 | 위험 사용자·위험 탐지 Graph API, 위험 사용자 알림, 위험 로그인 90일 보관 | P2 |
+| AiTM 피싱 | AiTM 탐지, Defender XDR 공격 자동 차단(세션 폐기 등), 교직원 피싱 모의훈련 | A5 |
+| 기기 감염(인포스틸러) | Defender for Endpoint P2(EDR) | A5 |
+| 사고 조사 | Audit(Premium): Entra·Exchange·OneDrive·SharePoint 감사 기록 1년 보관(표준 180일) | A5 |
+
+### 기준
+
+- **필수: Entra ID P2.** 위 통제 가운데 위험 탐지, 위험 기반 차단, PIM, 위험 정보 API는 P2부터 제공된다.
+- **권장: A5.** P2 범위에 AiTM 탐지, 공격 자동 차단, 기기 EDR, 감사 기록 1년 보관이 더해진다.
+
+| 기능 | A3 | A3 + Entra ID P2 | A5 |
+|---|---|---|---|
+| SAML 페더레이션·조건부 액세스 | ○ | ○ | ○ |
+| 위험 탐지(토큰·로그인) | 제한(상세·이력 없음) | ○ | ○ |
+| 위험 기반 차단·Microsoft 관리형 위험 정책 | × | ○ | ○ |
+| PIM | × | ○ | ○ |
+| 위험 정보 Graph API·알림 | × | ○ | ○ |
+| 위험 로그인 보관 | 30일 | 90일 | 90일 |
+| AiTM 탐지 | × | × | ○ |
+| 공격 자동 차단 | × | × | ○ |
+| 피싱 모의훈련 | × | × | ○ |
+| 기기 EDR | × | × | ○ |
+| 감사 기록 보관 | 180일 | 180일 | 1년 |
+
+A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free라 조건부 액세스가 없다.
+
+### 설계·운영 요구사항
+
+1. 고위험 로그인은 'MFA 요구'가 아니라 '차단'으로 설정한다. `federatedIdpMfaBehavior`가 `acceptIfMfaDoneByFederatedIdp`(이 PoC 설정)이면 IdP가 보낸 MFA 클레임이 Entra의 MFA 요구를 충족하므로, 위조 토큰에는 MFA 요구가 효과가 없다(Octo Tempest 기법).
+2. 위험할 때 SEN IdP에 추가 인증을 요구하려면 `enforceMfaByFederatedIdp`와 SEN IdP의 추가 인증 처리가 필요하다(이 PoC에서 미검증).
+3. 비밀번호 기반 탐지(`Leaked credentials`, `Password spray`)는 비밀번호가 Entra에 없어 적용되지 않는다. 비밀번호 공격 방어는 SEN IdP가 맡는다.
+4. Microsoft 관리형 위험 정책은 P2 테넌트에 보고 전용으로 생성되고, 그대로 두면 30일 이후 자동으로 켜진다. 위험 로그인 정책은 MFA를 등록하지 않은 사용자의 위험 로그인을 차단하므로, SEN MFA 클레임이 없는 학생에게 미치는 영향을 보고 전용 기간에 확인한다.
+5. P2 기능은 P2가 할당된 사용자에게 적용된다.
+6. 서명키는 정기적으로 교체하고(`nextSigningCertificate` 사전 등록 방식, 이 PoC에서 검증), 담당자가 바뀌면 폐기·재발급한다.
+7. 확인 필요
+   - 학교 라이선스가 Microsoft 365 A3인지 Office 365 A3인지
+   - AiTM 탐지의 문서상 요건(Microsoft 365 E5)이 A5에도 적용되는지
+   - A5 학생 사용 혜택의 Defender for Office 365는 Plan 1이라 피싱 모의훈련 대상은 교직원
+
+### 출처
+
+- 위협: [Microsoft 디지털 방어 보고서 2025](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/bade/documents/products-and-services/en-us/security/Microsoft-Digital-Defense-Report-2025-v5-21Nov25.pdf)(p.17), [2026](https://aka.ms/Microsoft-Digital-Defense-Report-2026)(p.45·64·85), [Octo Tempest](https://www.microsoft.com/en-us/security/blog/2023/10/25/octo-tempest-crosses-boundaries-to-facilitate-extortion-encryption-and-destruction/), [Storm-0501(2024)](https://www.microsoft.com/en-us/security/blog/2024/09/26/storm-0501-ransomware-attacks-expanding-to-hybrid-cloud-environments/), [Storm-0501(2025)](https://www.microsoft.com/en-us/security/blog/2025/08/27/storm-0501s-evolving-techniques-lead-to-cloud-based-ransomware/), [쿠팡 조사 결과(과기정통부)](https://m.korea.kr/briefing/policyBriefingView.do?newsId=156744092), [교육부 2025 침해 통계](https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=105948&lev=0&searchType=null&statusYN=W&page=1&s=moe&m=020402&opType=N), [교육용 계정 집계(한국일보)](https://www.hankookilbo.com/news/article/A2026102217490005554), [PowerSchool(TechCrunch)](https://techcrunch.com/2025/01/17/malware-stole-internal-powerschool-passwords-from-engineers-hacked-computer/)
+- 기능·라이선스: [ID 보호 라이선스](https://learn.microsoft.com/en-us/entra/id-protection/overview-identity-protection), [위험 탐지 목록](https://learn.microsoft.com/en-us/entra/id-protection/concept-identity-protection-risks), [위험 기반 조건부 액세스](https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-risk-based-sign-in), [CAE](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation), [PIM 라이선스](https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals), [관리형 정책](https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies), [로그 보존](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention), [감사 활동 목록](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-audit-activities), [공격 자동 차단](https://learn.microsoft.com/en-us/defender-xdr/configure-attack-disruption), [Audit](https://learn.microsoft.com/en-us/purview/audit-solutions-overview), [교육용 A3](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-standard/standard-license)·[A5](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-advanced/advanced-license), [federatedIdpMfaBehavior](https://learn.microsoft.com/en-us/graph/api/resources/internaldomainfederation)
+
 ## 실행
 
 ```bash
