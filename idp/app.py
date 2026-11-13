@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
 TOTP_STEP = 30
-VERSION = "2026-11-12.joowon-root"
+VERSION = "2026-11-13.post-csp"
 
 
 def totp_at(secret_b32, counter, digits=6):
@@ -139,8 +139,14 @@ def create_app(overrides=None):
         return redirect(url_for("login", **params))
 
     def post_to_entra(fields):
-        return render_template("post.html", action=sc.ENTRA_ACS,
-                               fields={k: v for k, v in fields.items() if v is not None})
+        resp = Response(render_template("post.html", action=sc.ENTRA_ACS,
+                                        fields={k: v for k, v in fields.items() if v is not None}))
+        # Entra는 SAML 응답을 받은 뒤 앱의 리디렉션 주소(다른 출처, 네이티브 앱의 http://localhost 포함)로 바로 보낼 수 있다.
+        # 브라우저는 form-action을 그 리디렉션에도 적용하므로, 이 화면만은 form-action을 제한하지 않는다.
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; script-src 'self'; frame-ancestors 'none'")
+        return resp
 
     def normalize_id(raw):
         v = (raw or "").strip().lower()

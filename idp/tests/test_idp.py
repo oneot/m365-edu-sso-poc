@@ -217,6 +217,14 @@ def test_sso_flow_uses_domain_issuer_and_echoes_relaystate(client):
     assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
 
 
+def test_saml_post_page_does_not_restrict_form_action(client):
+    # Entra가 응답을 받은 뒤 앱 리디렉션 주소로 바로 보내는 경우(아이디 직접 입력, 오류 응답 등) 브라우저가 막지 않도록
+    resp = full_flow(client, D1, "student01")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "form-action" not in csp and "script-src 'self'" in csp
+    assert "form-action 'self'" in get(client, "/healthz").headers["Content-Security-Policy"]
+
+
 def test_second_tenant_uses_existing_session(client):
     full_flow(client, D1, "multi01")
     r = start_sso(client, D2, "_req2")
