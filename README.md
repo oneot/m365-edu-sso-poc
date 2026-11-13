@@ -5,6 +5,8 @@
 
 > 테스트 전용입니다. 실제 업무 계정을 쓰지 마세요.
 
+**시연 영상: https://demo.joowon.me** — 로그인 성공·거부·④ 통합 아이디·위험 로그인 탐지와 차단을 헤드리스 Chromium으로 녹화한 영상입니다. 영상 끝 화면과 '실제 결과'는 받은 토큰(계정·테넌트)과 Microsoft 응답(오류 코드)에서 읽은 값입니다. 2026-11-13 Microsoft 365 서비스 장애로 Outlook·Microsoft 365 웹·Defender 화면이 필요한 일부 시나리오는 보류했습니다(사이트에 보류 목록 표시).
+
 ## 구성
 
 | 폴더 | 내용 |
@@ -12,7 +14,7 @@
 | `idp/` | 테스트 IdP(Flask). 도메인별 Issuer·로그인 주소, 응답 서명, 학교 선택, 포털, 기록 |
 | `pages/` | 로그인 화면(GitHub Pages). 로그인 처리·서명은 `idp/`가 맡음 |
 | `graph/` | Microsoft Graph 일괄 설정 스크립트(현황 점검, ImmutableID, 페더레이션, 인증서 교체, 원복) |
-| `tools/` | 토큰 도우미, 테넌트 준비, 테스트 데이터·계정 생성, 배포, 로그인 종단 시험, 브라우저 시연 |
+| `tools/` | 토큰 도우미, 테넌트 준비, 테스트 데이터·계정 생성, 배포, 로그인 종단 시험, 브라우저 시연, 보안 데모, 시연 영상 녹화 |
 | `tests/` | Graph 스크립트 오프라인 시험(가짜 테넌트) |
 
 ```text
@@ -90,6 +92,7 @@
 - ④ 라우팅은 테넌트 A에 페더레이션한 도메인으로 시작한 로그인에 학교 B 도메인 Issuer로 답해도 학교 B로 로그인됐다. 문서에 없는 동작이므로 운영 채택 전에 Microsoft 확인이 필요하다.
 - `promptLoginBehavior`를 `nativeSupport`로 바꿔도 재인증 요구가 IdP에 전달되지 않았다. 재인증 주기는 IdP 세션 수명으로 통제해야 한다.
 - 인증서 교체는 next 사전 등록 → IdP 서명 전환 → 테넌트별 승격 순서로, 테넌트마다 시점을 맞추지 않아도 된다.
+- **IdP 구현 요건(브라우저 녹화에서 발견)**: Entra는 SAML 응답을 받은 뒤 확인 화면 없이 앱의 리디렉션 주소(다른 출처, 네이티브 앱의 `http://localhost` 포함)로 바로 보낼 수 있다(아이디 직접 입력, 재인증, 오류 응답). 브라우저는 자동 전송 화면의 CSP `form-action`을 이 리디렉션에도 적용하므로, `form-action`을 Entra 주소로만 제한하면 사용자가 "Microsoft 365로 이동하고 있습니다" 화면에 멈춘다. SAML 응답 자동 전송 화면에는 `form-action`을 제한하지 않는다(이 PoC IdP 2026-11-13 수정). HTTP 종단 시험은 CSP를 적용하지 않아 이 문제가 드러나지 않았다.
 
 앱 확인(사람이 직접): Teams·Outlook 앱 로그인 정상.
 
@@ -245,6 +248,8 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 
 ## 보안 데모: 위험 로그인 탐지·차단(2026-11-12)
 
+영상: [S0](https://demo.joowon.me/#S0) · [S1](https://demo.joowon.me/#S1) · [S2](https://demo.joowon.me/#S2) · [S3](https://demo.joowon.me/#S3) · [S4](https://demo.joowon.me/#S4) · [관리 포털](https://demo.joowon.me/#g-portal) (2026-11-13 녹화, 같은 시나리오 재실행)
+
 학교 B 테넌트(Microsoft 365 A5, Entra ID P2 포함)에서 계정 유출을 가정한 로그인을 재현했다. 재현 방법은 Microsoft의 위험 시뮬레이션 방법(Tor 익명 IP, 관리자 침해 확인)을 따랐고, 데모용 조건부 액세스 정책은 데모 계정 그룹에만 적용했다. 익명 IP 탐지(위험 중간)가 확실히 정책에 걸리도록 데모 정책은 '낮음 이상'으로 두었다. 공격자는 SEN 아이디·비밀번호를 가진 것으로 가정하므로 SEN IdP 로그인은 모두 통과한다.
 
 | 계정 | 데모 정책(조건부 액세스) | 재현 |
@@ -331,6 +336,19 @@ SUB=... RG=... PASSWORD_FILE=~/poc-test-password.txt TOTP_FILE=~/poc-totp.json \
 python tools/security_demo.py cae --confirm --password-file ~/poc-test-password.txt   # S4
 python tools/security_demo.py report             # 위험 탐지·로그인 기록·Defender 알림
 python tools/security_demo.py reset              # 데모 계정 위험 해제
+
+# 시연 영상 녹화(헤드리스 Chromium → MP4·포스터·manifest). 비밀번호·TOTP는 파일 또는 DEMO_PASSWORD/DEMO_TOTP_JSON
+pip install imageio-ffmpeg "requests[socks]"
+python tools/record_demos.py --list
+python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json --out-dir out/demo
+#   Tor 시나리오(S1~S3): Azure 컨테이너에서 Tor를 띄우고 SSH 터널(키 인증, Tor 포트만 전달)로 사용
+SUB=... RG=... KEY=~/tunnel-key tools/tor_tunnel.sh up        # 다른 터미널에서 유지
+python tools/record_demos.py ... --proxy socks5://127.0.0.1:9050
+SUB=... RG=... tools/tor_tunnel.sh down
+#   관리 포털(V1~V5): 전용 Chromium 프로필에 관리자가 한 번 로그인(로그인 상태 유지 '예')해 두고, 가릴 문자열 규칙 지정
+python tools/record_demos.py ... --portal-profile ~/portal-profile --mask-file ~/portal-masks.json
+#   시연 사이트 폴더로 게시(예상과 일치한 영상만, 나머지는 보류 목록)
+python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-demo --pending-reason "보류 사유"
 ```
 
 페더레이션 설정은 `graph/README.md`를 참고합니다. 여러 테넌트를 다시 로그인하지 않고 처리하려면 `-AuthMode AccessToken -AccessTokenProvider { param($t) & ./.venv/bin/python ./tools/graph_token.py token $t }`를 씁니다.
@@ -349,3 +367,4 @@ python tools/security_demo.py reset              # 데모 계정 위험 해제
 4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
 5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…`) 삭제
 6. 보안 데모: `security_demo.py reset`(위험 해제), `security_demo.py cleanup --delete-users`(데모 정책·그룹·계정 삭제). Defender XDR의 Entra ID Protection 알림 설정은 필요하면 기본값('High risk detections')으로 되돌린다.
+7. 시연 영상: `oneot/m365-edu-sso-poc-demo` 저장소(Pages `demo.joowon.me`) 삭제, joowon.me DNS `demo` CNAME 삭제, 포털 녹화용 Chromium 프로필 삭제
