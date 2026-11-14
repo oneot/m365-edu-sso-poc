@@ -5,7 +5,7 @@
 
 > 테스트 전용입니다. 실제 업무 계정을 쓰지 마세요.
 
-**시연 영상: https://demo.joowon.me** — 로그인 성공·거부·④ 통합 아이디·위험 로그인 탐지와 차단을 헤드리스 Chromium으로 녹화한 영상입니다. 영상 끝 화면과 '실제 결과'는 받은 토큰(계정·테넌트)과 Microsoft 응답(오류 코드)에서 읽은 값입니다. MFA 역할 전환(SEN은 1차 인증, MFA는 Microsoft) 뒤 2026-11-14에 42개 시나리오를 모두 다시 녹화했습니다(V1만 2026-11-13 녹화). 첫 MFA 등록 화면(C6)의 QR 코드와 비밀 키는 흐리게 처리했습니다.
+**시연 영상: https://demo.joowon.me** — 로그인 성공·거부·④ 통합 아이디·위험 로그인 탐지와 차단을 헤드리스 Chromium으로 녹화한 영상입니다. 영상 끝 화면과 '실제 결과'는 받은 토큰(계정·테넌트)과 Microsoft 응답(오류 코드)에서 읽은 값입니다. MFA 역할 전환(SEN은 1차 인증, MFA는 Microsoft) 뒤 2026-11-14에 42개 시나리오를 모두 다시 녹화했습니다(V1만 2026-11-13 녹화). 첫 MFA 등록 화면(C6)의 QR 코드와 비밀 키는 흐리게 처리했습니다. R13~R15 영상은 루트 `joowon.me`를 라우팅 전용 테넌트로 옮기기 전(학교 A 테넌트 시절) 녹화본입니다.
 
 ## 구성
 
@@ -34,7 +34,7 @@
 - **테넌트 구분**: Microsoft는 모든 테넌트가 같은 SP 식별값(`urn:federation:MicrosoftOnline`)을 쓰고 요청에 사용자 정보가 없다. 그래서 IdP는 **로그인 주소의 도메인**으로 학교 테넌트를 구분한다.
 - **도메인별 Issuer**: Entra ID는 페더레이션 도메인마다 고유한 Issuer를 요구한다. IdP는 응답마다 `https://auth.joowon.me/saml/m365/<도메인>`을 Issuer로 쓴다.
 - **늘지 않는 것**: IdP 서버 대수, 서명 인증서(1개를 모든 도메인에 등록), Microsoft 쪽 SP 등록(1개).
-- **라우팅 실험**: 루트 `joowon.me`(IdP 아이디 도메인, SEN의 `@senedu.kr` 역할)와 `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 둘 다 학교 A 테넌트(라우팅 테넌트 역할)에 페더레이션되어 있다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
+- **라우팅 실험**: 루트 `joowon.me`(IdP 아이디 도메인, SEN의 `@senedu.kr` 역할)와 `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 루트 `joowon.me`는 학생·교사 계정이 없는 라우팅 전용 테넌트에(2026-11-15부터), `id.joowon.me`는 학교 A 테넌트에 페더레이션되어 있다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
 - **인증 역할**: SEN IdP는 1차 인증(아이디·비밀번호)만 한다. MFA 등 2차 인증은 모두 Entra가 학교 테넌트에 등록된 인증 수단으로 수행한다. 페더레이션 도메인마다 `federatedIdpMfaBehavior = rejectMfaByFederatedIdp`를 설정하고, IdP 응답의 `AuthnContextClassRef`는 항상 `PasswordProtectedTransport`다(MFA 수행 표시 `multipleauthn`을 보내지 않음).
 - **MFA 시나리오**: 테넌트는 기본적으로 MFA를 요구하지 않고, 테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA(`perUserMfaState: enforced`)로 MFA 필수다. 이 두 계정과 보안 데모 `hack02`는 Entra에 타사 인증 앱(TOTP, 인증 방법 'Software OATH tokens')을 등록해 두었다. 학교 A는 이 인증 방법이 꺼져 있어 PoC에서 켰다.
 
@@ -110,7 +110,7 @@
 
 | 확인 | 결과 |
 |---|---|
-| 설정 전환 | 페더레이션 도메인 4개(`school1`·`school2`·`id`·루트 `joowon.me`)를 `acceptIfMfaDoneByFederatedIdp` → `rejectMfaByFederatedIdp`로 변경(Graph `PATCH /domains/{domain}/federationConfiguration/{id}`). 루트 `joowon.me`는 2026-11-15에 변경 |
+| 설정 전환 | 페더레이션 도메인 4개(`school1`·`school2`·`id`·루트 `joowon.me`)를 `acceptIfMfaDoneByFederatedIdp` → `rejectMfaByFederatedIdp`로 변경(Graph `PATCH /domains/{domain}/federationConfiguration/{id}`). 루트 `joowon.me`는 2026-11-15에 변경했고, 같은 날 라우팅 전용 테넌트로 옮기면서 같은 값으로 다시 만들었다 |
 | IdP MFA 표시 무시 | 전환 25초 뒤, IdP가 TOTP를 받고 `multipleauthn`을 보낸 `mfa01` 로그인이 성공하지 않고 Entra MFA 등록 화면(`ConvergedProofUpRedirect`)으로 넘어감. 전환 전에는 같은 응답으로 로그인 성공 |
 | MFA 대상이 아닌 계정 | A1(`student01`)은 전환 뒤에도 MFA 없이 성공 |
 | 첫 등록(C6) | 등록한 수단이 없는 MFA 대상 계정은 로그인 중 Microsoft 등록 화면으로 넘어가 인증 앱을 등록한 뒤 로그인 완료 |
@@ -157,7 +157,7 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 
 - Entra는 토큰 Issuer의 realm 루트 도메인과 매핑된 사용자 UPN의 루트 도메인을 비교한다([Federated Token Validation Policy](https://learn.microsoft.com/en-us/entra/identity/users/strengthen-federated-sign-in-security), 기본 적용). ④는 학교 도메인 Issuer로 답하므로 통과하고, 라우팅 도메인 Issuer로 답하면 막힌다.
 - 로그인 기록은 학생의 학교 테넌트에만 남는다. 라우팅 테넌트에는 남지 않는다.
-- 로그인 힌트로 시작하면 도메인 확인 대화상자에 라우팅 테넌트의 회사 브랜딩과 학교 계정이 함께 표시된다("school2…을(를) 신뢰합니까?").
+- 로그인 힌트로 시작하면 도메인 확인 대화상자에 라우팅 테넌트의 회사 브랜딩과 학교 계정이 함께 표시된다("school2…을(를) 신뢰합니까?"). 브랜딩이 없는 라우팅 전용 테넌트에서는 Microsoft 기본 화면이 표시된다(아래 '라우팅 전용 테넌트' 절).
 - Entra는 사용자가 입력한 아이디를 `username`으로 IdP에 넘긴다. IdP는 이 값이 세션 사용자와 다르면 다시 로그인시켜야 한다(R7).
 - 앱에 표시되는 계정은 학교 계정이다. 통합 아이디를 무음 로그인 힌트로 쓰는 앱은 AADSTS50058 뒤 대화형 로그인으로 넘어간다.
 
@@ -173,11 +173,46 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 1. 응답 Issuer는 반드시 학생 학교 도메인의 Issuer(R11).
 2. Entra가 넘기는 `username`을 세션 사용자와 비교(R7).
 3. 학교가 여럿이면 학교 선택 화면(R3).
-4. 라우팅 테넌트에는 도메인 인증·페더레이션만 필요하고 사용자는 필요 없다.
+4. 라우팅 도메인은 학교 테넌트가 아닌 라우팅 전용 테넌트에 둔다. 이 테넌트에는 도메인 인증·페더레이션만 있으면 되고 학생·교사 계정은 필요 없다(아래 '라우팅 전용 테넌트' 절).
 5. 학교별 도메인 페더레이션(기본안)은 그대로 필요하다. ④는 그 위의 편의 계층이고, 끄면 학교 계정 입력으로 돌아간다.
 6. 운영 전 Microsoft 지원 범위 확인, AADSTS5000820·50107 모니터링.
+7. 라우팅 도메인을 다른 테넌트로 옮기면 홈 영역 검색이 안정될 때까지(PoC 약 28분) SEN 아이디 입력 로그인이 간헐적으로 실패한다. 학교 계정 입력은 영향이 없다. 이전은 점검 시간에 공지하고 진행한다.
 
 남은 확인(사람이 직접): OneDrive 앱, Windows 로그인 화면에 통합 아이디 입력.
+
+### 라우팅 전용 테넌트(2026-11-15)
+
+루트 `joowon.me`(SEN 아이디 도메인, 운영의 `@senedu.kr` 역할)를 학교 A 테넌트에서 학생·교사 계정이 없는 별도 Entra 테넌트로 옮겼다. `id.joowon.me`는 비교용으로 학교 A 테넌트에 남겼다.
+
+옮긴 이유
+
+- 회사 브랜딩: 도메인 확인 대화상자와 '로그인 상태 유지' 화면은 사용자가 입력한 도메인이 속한 테넌트의 회사 브랜딩(로고·배경·문구)을 쓴다. 라우팅 도메인이 학교 테넌트에 있으면 다른 학교 학생에게도 그 학교의 브랜딩이 보인다.
+- 관리 범위: 라우팅 도메인의 페더레이션 설정(로그인 주소, 서명 인증서)은 그 테넌트 관리자가 바꿀 수 있다. 학교 테넌트에 두면 한 학교의 관리자 권한이 전체 학생의 SEN 아이디 로그인 경로에 영향을 준다.
+
+이전 절차(Graph)
+
+| 순서 | 작업 | 결과 |
+|---|---|---|
+| 사전 | 새 테넌트에 `POST /domains`(미인증 추가) → 받은 TXT 값(`MS=ms…`)을 DNS에 추가. 기존 테넌트용 TXT는 되돌리기용으로 남김 | 기존 테넌트에서 인증된 도메인도 새 테넌트에 미인증으로 추가할 수 있음 |
+| 1 | 기존 테넌트: 페더레이션 설정 저장 → `DELETE /domains/joowon.me/federationConfiguration/{id}` → `GET /domains/joowon.me/domainNameReferences`(0건) → `DELETE /domains/joowon.me` | 3초 |
+| 2 | 새 테넌트: `POST /domains/joowon.me/verify` | 기존 테넌트에서 삭제한 지 16초 뒤 첫 시도에 인증 |
+| 3 | 새 테넌트: 저장한 값(Issuer, 로그인·로그아웃 주소, 서명 인증서 현재·다음, `rejectMfaByFederatedIdp`)으로 `POST /domains/joowon.me/federationConfiguration` | 첫 시도에 생성. 기존 테넌트에서 지운 같은 Issuer를 바로 등록할 수 있었음 |
+| 4 | IdP: `domains.json`에서 `joowon.me`의 테넌트 값 변경·배포 | IdP 응답 방식은 그대로 |
+
+확인한 동작
+
+| 확인 | 결과 |
+|---|---|
+| 홈 영역 검색 전파 | 페더레이션 해제 뒤 약 28분 동안 `getuserrealm`·`GetCredentialType`이 요청마다 Federated와 Unknown(계정 없음)을 섞어 돌려줬다. 이 동안 SEN 아이디 입력 로그인은 간헐적으로 실패했다(R15 첫 시도: 계정 없음). OpenID 구성(`/joowon.me/v2.0/.well-known/openid-configuration`)은 처음부터 새 테넌트를 가리켰다 |
+| 영향 범위 | 학교 계정 입력·포털 링크·`id.joowon.me` 등 나머지 32개 시나리오는 전환 직후에도 이전과 같은 결과 |
+| R13·R14·R15 | 성공(학교 A, 학교 B, 학교 선택 뒤 학교 B). 라우팅 전용 테넌트에 계정이 없어도 학교 테넌트로 로그인됨 |
+| MFA 필수 계정(`mfa02@joowon.me`) | 학교 B 계정의 Entra MFA(인증 앱 코드) 뒤 성공 |
+| 포털 링크(`domain_hint=joowon.me`, Microsoft 365 웹 `login_hint=student02@joowon.me`) | 성공(학교 B) |
+| 라우팅 전용 테넌트를 지정한 요청 | 거부(AADSTS50020) |
+| 잘못된 구현(라우팅 도메인 Issuer로 응답, `teacher01`) | 거부(AADSTS90072, 라우팅 전용 테넌트에 해당 계정 없음). 학교 A 테넌트에 있을 때는 AADSTS5000820(R11) |
+| 로그인 기록 | 학교 테넌트에만 남고 라우팅 전용 테넌트에는 0건 |
+| 회사 브랜딩 | 라우팅 전용 테넌트에는 브랜딩이 없어 도메인 확인 대화상자·로그인 상태 유지 화면이 Microsoft 기본 화면으로 표시됨(화면 설정값 `dynamicTenantBranding` 없음). 같은 학교 B 학생이 `id.joowon.me`로 들어오면 학교 A 브랜딩이 표시됨. 화면의 조직 이름은 PoC 테넌트 이름이 모두 같아 어느 테넌트 것인지 구분하지 못했다 |
+| 실제 앱 | Outlook 웹(`student02@joowon.me` → 학교 B 메일함), Teams 웹(`multi01@joowon.me` → 학교 선택 → 학교 A) 진입(`tools/browser_route_demo.py`) |
 
 ## Windows 기기 로그인(PoC 미시험)
 
@@ -361,8 +396,9 @@ python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file
 # 로그인 종단 시험(실제 테넌트). Entra MFA 코드 입력까지 HTTP로 진행
 python tools/e2e_signin.py --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json --out out/e2e.json
 
-# ④ 실제 웹앱 브라우저 시연(헤드리스 Chrome, 임시 프로필, 단계별 화면 저장)
+# ④ 실제 웹앱 브라우저 시연(헤드리스 Chrome, 임시 프로필, 단계별 화면 저장). --route 기본값은 id 하위 도메인
 python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --out-dir out/route-demo
+python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --out-dir out/route-demo-root --route joowon.me
 
 # 보안 데모(학교 B). 필요한 관리자 권한은 tools/security_demo.py 머리말 참고(GRAPH_EXTRA_SCOPES)
 python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=M365EDU_A5_STUDENT \
@@ -402,9 +438,9 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 ## 정리
 
 1. `graph/Invoke-SenM365Federation.ps1 -Mode Rollback`으로 페더레이션 해제
-2. 테스트 계정·도메인(`school1`·`school2`·`id` 하위 도메인, 루트 `joowon.me`) 삭제, 사용자별 MFA 해제(계정을 지우면 등록한 Entra 인증 앱도 함께 지워짐). 학교 A: 인증 방법 'Software OATH tokens'를 원래대로 끄기(PoC에서 켬), Entra 인증 앱 비밀값 파일 삭제
+2. 테스트 계정·도메인(`school1`·`school2`·`id` 하위 도메인) 삭제, 라우팅 전용 테넌트의 루트 `joowon.me` 페더레이션·도메인 삭제, 사용자별 MFA 해제(계정을 지우면 등록한 Entra 인증 앱도 함께 지워짐). 학교 A: 인증 방법 'Software OATH tokens'를 원래대로 끄기(PoC에서 켬), Entra 인증 앱 비밀값 파일 삭제
 3. 학교 B 테넌트: 파트너·벤더 MFA 정책 2개의 `ALL` 그룹 제외를 되돌리고 그룹 삭제
 4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
-5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…`) 삭제
+5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…` 전부) 삭제
 6. 보안 데모: `security_demo.py reset`(위험 해제), `security_demo.py cleanup --delete-users`(데모 정책·그룹·계정 삭제). Defender XDR의 Entra ID Protection 알림 설정은 필요하면 기본값('High risk detections')으로 되돌린다.
 7. 시연 영상: `oneot/m365-edu-sso-poc-demo` 저장소(Pages `demo.joowon.me`) 삭제, joowon.me DNS `demo` CNAME 삭제, 포털 녹화용 Chromium 프로필 삭제

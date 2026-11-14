@@ -7,7 +7,7 @@
   4) Microsoft 확인 화면(도메인 확인, 로그인 상태 유지)
   5) 앱 화면
 
-사용: python browser_route_demo.py --password-file <파일> --out-dir <폴더> [--flow outlook teams]
+사용: python browser_route_demo.py --password-file <파일> --out-dir <폴더> [--flow outlook teams] [--route joowon.me]
 """
 import argparse
 import json
@@ -23,15 +23,19 @@ ROUTE = "id.joowon.me"
 IDP_HOST, LOGIN_HOST = "auth.joowon.me", "login.joowon.me"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/157.0.0.0 Safari/537.36")
-FLOWS = {
-    # 이름: (앱 주소, 통합 아이디, IdP 아이디, 고를 학교 도메인, 앱 주소 판별)
-    "outlook": ("https://outlook.office.com/mail/", f"student02@{ROUTE}", "student02", None, "outlook."),
-    "teams": ("https://teams.microsoft.com/v2/", f"multi01@{ROUTE}", "multi01", "school1.joowon.me",
-              "teams."),
-    # 포털 링크(login_hint=통합 아이디): 아이디 입력 없이 진행되어 도메인 확인 대화상자가 뜨는 경로
-    "m365": (f"https://www.office.com/?auth=2&login_hint=student02%40{ROUTE}", f"student02@{ROUTE}", "student02", None,
-             "m365.cloud"),
-}
+def make_flows(route):
+    return {
+        # 이름: (앱 주소, 통합 아이디, IdP 아이디, 고를 학교 도메인, 앱 주소 판별)
+        "outlook": ("https://outlook.office.com/mail/", f"student02@{route}", "student02", None, "outlook."),
+        "teams": ("https://teams.microsoft.com/v2/", f"multi01@{route}", "multi01", "school1.joowon.me",
+                  "teams."),
+        # 포털 링크(login_hint=통합 아이디): 아이디 입력 없이 진행되어 도메인 확인 대화상자가 뜨는 경로
+        "m365": (f"https://www.office.com/?auth=2&login_hint=student02%40{route}", f"student02@{route}", "student02", None,
+                 "m365.cloud"),
+    }
+
+
+FLOWS = make_flows(ROUTE)
 # 앱 오른쪽 위 계정 버튼(로그인한 계정·조직 확인용)
 ACCOUNT_BUTTONS = ["#O365_MainLink_Me", "#idna-me-control-avatar-trigger", "[data-tid='me-control-avatar-trigger']",
                    "button[aria-label*='계정 관리자']", "button[aria-label*='프로필']", "button[aria-label*='Account manager']"]
@@ -141,7 +145,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--settle", type=int, default=25, help="앱 화면이 다 그려질 때까지 기다리는 초")
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--route", default=ROUTE, help="통합 아이디 도메인(예: 루트 SEN 아이디 도메인 joowon.me)")
     args = ap.parse_args()
+    FLOWS.update(make_flows(args.route))
     password = open(args.password_file, encoding="utf-8").read().strip()
     results = []
     with sync_playwright() as pw:
