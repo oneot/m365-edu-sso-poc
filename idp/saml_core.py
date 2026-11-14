@@ -31,7 +31,6 @@ ENTRA_SP_ENTITY_ID = "urn:federation:MicrosoftOnline"
 ENTRA_ACS = "https://login.microsoftonline.com/login.srf"
 NAMEID_PERSISTENT = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
 AC_PASSWORD = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
-AC_MFA = "http://schemas.microsoft.com/claims/multipleauthn"
 STATUS_SUCCESS = "urn:oasis:names:tc:SAML:2.0:status:Success"
 STATUS_RESPONDER = "urn:oasis:names:tc:SAML:2.0:status:Responder"
 STATUS_NO_PASSIVE = "urn:oasis:names:tc:SAML:2.0:status:NoPassive"
@@ -105,7 +104,7 @@ def _el(parent, ns, tag, text=None, **attrs):
     return e
 
 
-def build_assertion(*, issuer, name_id, upn, in_response_to, mfa=False, auth_instant=None, now=None,
+def build_assertion(*, issuer, name_id, upn, in_response_to, auth_instant=None, now=None,
                     lifetime=dt.timedelta(minutes=10)):
     t = now or utcnow()
     aid = new_id()
@@ -123,7 +122,8 @@ def build_assertion(*, issuer, name_id, upn, in_response_to, mfa=False, auth_ins
     attr = _el(_el(a, NS_SAML, "AttributeStatement"), NS_SAML, "Attribute", Name="IDPEmail")
     _el(attr, NS_SAML, "AttributeValue", upn)
     authn = _el(a, NS_SAML, "AuthnStatement", AuthnInstant=fmt(auth_instant or t), SessionIndex=aid)
-    _el(_el(authn, NS_SAML, "AuthnContext"), NS_SAML, "AuthnContextClassRef", AC_MFA if mfa else AC_PASSWORD)
+    # 1차 인증만 표시한다. MFA는 Entra가 수행한다(federatedIdpMfaBehavior=rejectMfaByFederatedIdp).
+    _el(_el(authn, NS_SAML, "AuthnContext"), NS_SAML, "AuthnContextClassRef", AC_PASSWORD)
     return a, aid
 
 
@@ -146,12 +146,12 @@ def _response_shell(issuer, in_response_to, now):
     return resp
 
 
-def build_response(*, issuer, in_response_to, name_id, upn, key_pem, cert_pem, mfa=False, auth_instant=None,
+def build_response(*, issuer, in_response_to, name_id, upn, key_pem, cert_pem, auth_instant=None,
                    tamper=False, now=None):
     """서명된 SAML Response XML(bytes)을 만든다. tamper=True면 서명 뒤 값을 바꿔 서명 검증이 실패하게 한다."""
     t = now or utcnow()
     assertion, aid = build_assertion(issuer=issuer, name_id=name_id, upn=upn, in_response_to=in_response_to,
-                                     mfa=mfa, auth_instant=auth_instant, now=t)
+                                     auth_instant=auth_instant, now=t)
     signed = sign_assertion(assertion, aid, key_pem, cert_pem)
     if tamper:
         value = signed.find(f".//{{{NS_SAML}}}AttributeValue")

@@ -24,7 +24,7 @@ $cfgBase = @"
   SignOutUri = 'https://idp.senedu.kr/saml/m365/slo'
   SigningCertificatePath = './certs/current.cer'
   NextSigningCertificatePath = '__NEXT__'
-  FederatedIdpMfaBehavior = 'acceptIfMfaDoneByFederatedIdp'
+  FederatedIdpMfaBehavior = 'rejectMfaByFederatedIdp'
   IsSignedAuthenticationRequestRequired = `$false
 }
 "@

@@ -3,22 +3,21 @@
 헤드리스 Chrome(Playwright, 임시 프로필)이 사람이 하는 순서를 그대로 따른다.
   1) 앱 접속 → Microsoft 로그인 화면에 통합 아이디 입력
   2) IdP 로그인 화면(GitHub Pages)에 비밀번호 입력(아이디는 IdP가 미리 채움)
-  3) 학교 선택(여러 학교 소속) / 2단계 인증(TOTP)
+  3) 학교 선택(여러 학교 소속)
   4) Microsoft 확인 화면(도메인 확인, 로그인 상태 유지)
   5) 앱 화면
 
-사용: python browser_route_demo.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> [--flow outlook teams]
+사용: python browser_route_demo.py --password-file <파일> --out-dir <폴더> [--flow outlook teams]
 """
 import argparse
 import json
 import os
 import re
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
-from e2e_signin import totp_now
 
 ROUTE = "id.joowon.me"
 IDP_HOST, LOGIN_HOST = "auth.joowon.me", "login.joowon.me"
@@ -47,7 +46,7 @@ def click_first(page, selectors):
     return None
 
 
-def run_flow(pw, name, args, password, totp):
+def run_flow(pw, name, args, password):
     url, routing_id, idp_user, choose, app_host = FLOWS[name]
     out_dir = os.path.join(args.out_dir, name)
     os.makedirs(out_dir, exist_ok=True)
@@ -55,7 +54,6 @@ def run_flow(pw, name, args, password, totp):
     ctx = browser.new_context(locale="ko-KR", user_agent=UA, viewport={"width": 1280, "height": 800})
     page = ctx.new_page()
     log, shots, done = [], [], set()
-    mfa_tries = 0
 
     def shot(label):
         path = os.path.join(out_dir, f"{len(shots) + 1:02d}-{label}.png")
@@ -115,13 +113,6 @@ def run_flow(pw, name, args, password, totp):
                 shot("sen-choose-school")
                 page.locator(f"button[name=domain][value='{choose}']").click()
                 done.add("choose")
-            elif page.locator("input[name=code]").count() and mfa_tries < 3 and (
-                    mfa_tries == 0 or page.locator(".alert").count()):
-                # 다른 시험이 같은 30초 코드를 이미 썼으면 IdP가 재사용으로 거부 → 다음 코드로 재시도
-                shot("sen-mfa" if mfa_tries == 0 else f"sen-mfa-retry{mfa_tries}")
-                page.locator("input[name=code]").fill(totp_now(idp_user, totp[idp_user]))
-                page.locator("button[type=submit]").click()
-                mfa_tries += 1
         elif app_host in host and "idp-login" in done:
             page.wait_for_timeout(args.settle * 1000)
             result.update(result="app", title=page.title(), url=f"{host}{urlparse(page.url).path}")
@@ -145,7 +136,6 @@ def run_flow(pw, name, args, password, totp):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--password-file", required=True)
-    ap.add_argument("--totp-file", required=True)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--flow", nargs="*", default=list(FLOWS))
     ap.add_argument("--timeout", type=int, default=150)
@@ -153,12 +143,10 @@ def main():
     ap.add_argument("--headed", action="store_true")
     args = ap.parse_args()
     password = open(args.password_file, encoding="utf-8").read().strip()
-    totp = {u: parse_qs(urlparse(x).query)["secret"][0]
-            for u, x in json.load(open(args.totp_file, encoding="utf-8")).items()}
     results = []
     with sync_playwright() as pw:
         for name in args.flow:
-            r = run_flow(pw, name, args, password, totp)
+            r = run_flow(pw, name, args, password)
             results.append(r)
             print(json.dumps({k: v for k, v in r.items() if k != "screenshots"}, ensure_ascii=False))
     with open(os.path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as f:

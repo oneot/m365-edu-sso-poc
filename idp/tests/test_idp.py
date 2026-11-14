@@ -5,7 +5,6 @@ import json
 import os
 import re
 import sys
-import time
 import zlib
 from urllib.parse import parse_qs, urlparse
 
@@ -20,11 +19,10 @@ from werkzeug.security import generate_password_hash
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import saml_core as sc  # noqa: E402
-from app import create_app, totp_at  # noqa: E402
+from app import create_app  # noqa: E402
 
 BASE = "https://auth.test"
 PW = "test-password"
-SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 D1, D2, DR = "school1.example.edu", "school2.example.edu", "id.example.edu"
 
 
@@ -51,23 +49,21 @@ def _account(uid, domain):
 def data_dir(tmp_path):
     (tmp_path / "domains.json").write_text(json.dumps({
         D1: {"mode": "school", "tenantId": "t1", "schoolName": "학교 A"},
+        # requireMfa(도메인)·mfa(계정)는 이전 IdP 2단계 인증 설정. 지금 IdP는 무시해야 한다.
         D2: {"mode": "school", "tenantId": "t2", "schoolName": "학교 B", "requireMfa": True},
         DR: {"mode": "route", "tenantId": "t1", "schoolName": "통합"},
     }), encoding="utf-8")
     h = generate_password_hash(PW)
     users = {
         "student01": {"name": "학생01", "passwordHash": h, "accounts": [_account("student01", D1)], "flags": {}},
-        "student02": {"name": "학생02", "passwordHash": h, "accounts": [_account("student02", D2)], "flags": {},
-                      "totpSecret": SECRET},
-        "nosecret02": {"name": "x", "passwordHash": h, "accounts": [_account("nosecret02", D2)], "flags": {}},
+        "student02": {"name": "학생02", "passwordHash": h, "accounts": [_account("student02", D2)], "flags": {}},
         "multi01": {"name": "겸임", "passwordHash": h, "accounts": [_account("multi01", D1), _account("multi01", D2)],
-                    "flags": {}, "totpSecret": SECRET},
+                    "flags": {}},
         "badissuer01": {"name": "x", "passwordHash": h, "accounts": [_account("badissuer01", D1)],
                         "flags": {"badIssuer": True}},
         "xdomain01": {"name": "x", "passwordHash": h, "accounts": [_account("xdomain01", D1)],
                       "flags": {"routeIssuerFromRequest": True}},
-        "mfa01": {"name": "m", "passwordHash": h, "accounts": [_account("mfa01", D1)], "flags": {"mfa": True},
-                  "totpSecret": SECRET},
+        "mfa01": {"name": "m", "passwordHash": h, "accounts": [_account("mfa01", D1)], "flags": {"mfa": True}},
     }
     (tmp_path / "users.json").write_text(json.dumps(users), encoding="utf-8")
     links_src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "links.json")
@@ -153,19 +149,6 @@ def text(root, path):
     return root.findtext(path, namespaces={"saml": sc.NS_SAML, "samlp": sc.NS_SAMLP})
 
 
-def current_code(offset=0):
-    return totp_at(SECRET, int(time.time() // 30) + offset)
-
-
-def pass_mfa(client, resp, code=None):
-    assert resp.status_code == 302 and "/mfa" in resp.location, resp.status_code
-    assert "인증 코드" in get(client, resp.location).get_data(as_text=True)
-    q = {k: v[0] for k, v in parse_qs(urlparse(resp.location).query).items()}
-    r = post(client, "/mfa", data={**q, "code": code or current_code()})
-    assert r.status_code == 302, r.status_code
-    return get(client, r.location)
-
-
 def full_flow(client, domain, uid, req_id="_req1"):
     r = start_sso(client, domain, req_id)
     assert r.status_code == 302 and "/login" in r.location
@@ -229,14 +212,13 @@ def test_second_tenant_uses_existing_session(client):
     full_flow(client, D1, "multi01")
     r = start_sso(client, D2, "_req2")
     assert r.status_code == 302 and "/saml/continue" in r.location
-    root, _, _ = saml_from(pass_mfa(client, get(client, r.location)))  # 학교 B는 2단계 인증만 추가로 요구
+    root, _, _ = saml_from(get(client, r.location))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
     assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"multi01@{D2}"
-    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_MFA
 
 
 def test_route_domain_single_account_answers_with_school_issuer(client):
-    root, _, _ = saml_from(pass_mfa(client, full_flow(client, DR, "student02")))
+    root, _, _ = saml_from(full_flow(client, DR, "student02"))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
 
 
@@ -245,8 +227,8 @@ def test_route_domain_multi_account_shows_chooser(client):
     body = r.get_data(as_text=True)
     assert "어느 학교로 로그인할까요" in body
     k = re.search(r'name="k" value="([^"]+)"', body).group(1)
-    root, _, _ = saml_from(pass_mfa(client, post(client, "/saml/continue", data={"k": k, "domain": D2})))
-    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"  # 2단계 인증 뒤에도 고른 학교 유지
+    root, _, _ = saml_from(post(client, "/saml/continue", data={"k": k, "domain": D2}))
+    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
 
 
 def test_unlinked_tenant_is_refused(client):
@@ -268,34 +250,16 @@ def test_route_issuer_from_request_flag_only_affects_route_domain(client):
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D1}"
 
 
-def test_mfa_flag_sets_authn_context(client):
-    root, _, _ = saml_from(pass_mfa(client, full_flow(client, D1, "mfa01")))
-    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_MFA
-
-
-def test_wrong_and_reused_totp_rejected(app):
+def test_idp_never_asserts_mfa(app):
+    # MFA는 Entra가 수행한다. 이전 2단계 인증 설정(계정 mfa, 도메인 requireMfa)이 남아 있어도 IdP는 1차 인증만 표시한다.
     c = app.test_client()
-    r = full_flow(c, D2, "student02")
-    q = {k: v[0] for k, v in parse_qs(urlparse(r.location).query).items()}
-    bad = "000000" if current_code() != "000000" else "111111"
-    assert post(c, "/mfa", data={**q, "code": bad}).status_code == 401
-    code = current_code()
-    saml_from(pass_mfa(c, r, code))
-    c2 = app.test_client()
-    r2 = full_flow(c2, D2, "student02", "_req2")
-    q2 = {k: v[0] for k, v in parse_qs(urlparse(r2.location).query).items()}
-    assert post(c2, "/mfa", data={**q2, "code": code}).status_code == 401
-
-
-def test_require_mfa_without_secret_is_refused(client):
-    assert full_flow(client, D2, "nosecret02").status_code == 403
-
-
-def test_launch_steps_up_for_mfa_school(client):
-    full_flow(client, D1, "multi01")
-    r = get(client, f"/portal/launch?domain={D2}&app=0")
-    root, _, relay = saml_from(pass_mfa(client, r))
-    assert root.get("InResponseTo") is None and text(root, ".//saml:AuthnContextClassRef") == sc.AC_MFA
+    root, _, _ = saml_from(full_flow(c, D1, "mfa01"))
+    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
+    root, _, _ = saml_from(get(c, f"/portal/launch?domain={D1}&app=0"))
+    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
+    assert get(c, "/mfa").status_code == 404
+    root, _, _ = saml_from(full_flow(app.test_client(), D2, "student02"))
+    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
 
 
 def test_passive_request_without_session_returns_nopassive(client):
@@ -371,7 +335,7 @@ def test_shared_pc_hint_mismatch_forces_login(client):
     # 로그인 화면을 건너뛰고 바로 이어 가려 해도 막힌다
     assert "/login" in get(client, f"/saml/continue?k={q['k']}").location
     r = login(client, "student02", q["k"])
-    root, _, _ = saml_from(pass_mfa(client, get(client, r.location)))
+    root, _, _ = saml_from(get(client, r.location))
     assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"student02@{D2}"
 
 

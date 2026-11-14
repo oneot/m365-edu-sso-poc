@@ -99,7 +99,9 @@
 
 ## PoC에서 확인한 설정 동작
 
-- `FederatedIdpMfaBehavior = acceptIfMfaDoneByFederatedIdp`: IdP가 `multipleauthn`을 보내면 테넌트의 MFA 필수 조건부 액세스를 충족합니다(Entra 로그인 로그: "MFA requirement satisfied by claim in the token"). 보내지 않으면 Entra MFA 등록 화면으로 넘어갑니다.
+- `FederatedIdpMfaBehavior = rejectMfaByFederatedIdp`(예시 설정 기본값): MFA는 Entra가 사용자가 등록한 인증 수단으로 수행하고, IdP가 보낸 `multipleauthn`은 무시합니다. PoC에서 IdP가 MFA 표시를 보내도 Entra가 MFA를 요구하는 것을 확인했습니다(2026-11-14, 값을 바꾼 직후부터 적용). MFA를 요구받지 않는 계정의 로그인은 달라지지 않습니다.
+- 이미 페더레이션된 도메인은 `Federate`가 건너뛰므로, 값을 바꿀 때는 `PATCH /domains/{domain}/federationConfiguration/{id}`로 `federatedIdpMfaBehavior`만 바꿉니다.
+- 이전 PoC 값 `acceptIfMfaDoneByFederatedIdp`: IdP가 `multipleauthn`을 보내면 Entra의 MFA 요구(사용자별 MFA, 조건부 액세스, 위험 기반 정책 포함)가 충족됐습니다(Entra 로그인 로그: "MFA requirement satisfied by claim provided by external provider").
 - `promptLoginBehavior`: 스크립트는 설정하지 않습니다. `nativeSupport`로 바꿔도 앱의 재인증 요구(prompt=login)가 SAML 요청에 담기지 않았습니다.
 - `nextSigningCertificate`: 승격 전에도 next 인증서로 서명한 응답을 받아들였습니다. 5단계(선등록 → IdP 서명 전환 → 승격)를 테넌트마다 시점을 맞추지 않고 진행할 수 있습니다.
 

@@ -7,12 +7,17 @@
   받은 토큰의 계정·학교를 보여 주는 결과 화면으로 바꾼다(토큰 교환은 이 스크립트가 PKCE로 한다).
 - 관리 포털 시나리오는 --portal-profile(미리 로그인해 둔 전용 프로필)을 쓰고,
   --mask-file 의 규칙으로 화면 글자(테넌트 ID, 관리자 계정, 접속 IP 등)를 가린다.
+- MFA는 Entra가 수행한다. --totp-file 은 Entra에 등록한 인증 앱 비밀값(학교 계정 UPN → base32 또는 otpauth 주소)이고,
+  Microsoft 코드 입력 화면에서 쓴다. 등록 시나리오(C6)와 --register 는 Microsoft 등록 화면에서 받은 비밀값을 이 파일에 더한다.
+  등록 화면의 QR 코드와 비밀 키는 영상에서 흐리게 처리한다.
 
 사용:
   python record_demos.py --list
   python record_demos.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> [--only A1 R1 ...]
          [--proxy socks5://127.0.0.1:9050] [--portal-profile <폴더> --mask-file <JSON>]
-  비밀번호·TOTP는 환경 변수 DEMO_PASSWORD / DEMO_TOTP_JSON 으로도 받는다.
+  python record_demos.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> --register <학교 계정 UPN> ...
+         (Entra MFA 등록만 실행. 계정에 MFA 요구(사용자별 MFA 등)가 있어야 등록 화면이 뜬다)
+  비밀번호·TOTP는 환경 변수 DEMO_PASSWORD / DEMO_TOTP_JSON 으로도 받는다(등록 결과를 저장하려면 --totp-file).
   S4(관리자 침해 확인)는 graph_token.py 토큰 캐시를 쓰고, GRAPH_EXTRA_SCOPES 에 IdentityRiskyUser.ReadWrite.All 이 필요하다.
 """
 import argparse
@@ -34,7 +39,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 import requests
 from playwright.sync_api import sync_playwright
 
-from e2e_signin import AAD, CLIENT_ID, D1, D2, DR, DROOT, IDP, IDP_HOST, REDIRECT, b64url, jwt_claims, totp_now
+from e2e_signin import AAD, CLIENT_ID, D1, D2, DR, DROOT, IDP, IDP_HOST, REDIRECT, b64url, jwt_claims, load_totp, totp_now
 
 LOGIN_HOST = "login.joowon.me"
 MS_HOSTS = ("login.microsoftonline.com", "login.microsoft.com", "login.windows.net")
@@ -57,12 +62,16 @@ GROUPS = {
 APPS = {  # 이름: (표시 이름, 주소, 앱 화면 판별 호스트, 화면이 다 그려질 때까지 기다리는 초)
     "outlook": ("Outlook 웹", "https://outlook.office.com/mail/", ("outlook.office.com", "outlook.cloud.microsoft"), 14),
     "teams": ("Teams 웹", "https://teams.microsoft.com/v2/", ("teams.microsoft.com", "teams.cloud.microsoft"), 25),
-    "m365": ("Microsoft 365 웹", "https://www.office.com/?auth=2", ("m365.cloud.microsoft", "www.microsoft365.com"), 12),
+    "m365": ("Microsoft 365 웹", "https://www.office.com/?auth=2", ("m365.cloud.microsoft", "www.microsoft365.com",
+                                                                "copilot.cloud.microsoft"), 12),
     "myapps": ("내 앱(My Apps)", "https://myapps.microsoft.com/", ("myapps.microsoft.com", "myapplications.microsoft.com"), 10),
 }
 ACCOUNT_BUTTONS = ["#O365_MainLink_Me", "#mectrl_main_trigger", "#idna-me-control-avatar-trigger",
                    "[data-tid='me-control-avatar-trigger']", "button[aria-label*='계정 관리자']",
-                   "button[aria-label*='Account manager']", "button[aria-label*='프로필']"]
+                   "button[aria-label*='Account manager']", "button[aria-label*='프로필']",
+                   # Microsoft 365 Copilot 앱(m365.cloud.microsoft): 왼쪽 아래 계정 단추
+                   "[role=button][aria-label*='회사 계정']", "[role=button][aria-label*='학교 계정']",
+                   "[role=button][aria-label*='Work account']", "[role=button][aria-label*='School account']"]
 STS_TEXT = {
     "50107": "등록되지 않은 Issuer(페더레이션 영역 없음)",
     "500069": "SAML 응답 서명 검증 실패",
@@ -78,10 +87,29 @@ STS_TEXT = {
 CFG_JS = """() => { const c = window.$Config; if (!c) return null;
   return {pgid: c.pgid || c.sPageId || null, err: c.sErrorCode || (c.iErrorCode ? String(c.iErrorCode) : null),
           sts: c.stsErrorCode ? String(c.stsErrorCode) : null,
-          msg: c.strServiceExceptionMessage || c.sErrTxt || null, user: c.sPOST_Username || null}; }"""
+          msg: c.strServiceExceptionMessage || c.sErrTxt || null, user: c.sPOST_Username || null,
+          campaign: !!c.fIsRegistrationCampaignInterrupt}; }"""
 ERROR_PAGES = {"ConvergedError", "ConvergedConditionalAccess", "ConvergedProofUpRedirect", "ConvergedTFA"}
 TRANSIENT = {"50168", "399218"}  # 기기 SSO 확인, 도메인 확인 대화상자
 SIGNIN_PAGES = {"ConvergedSignIn", "KmsiInterrupt", "CmsiInterrupt"}  # 이전 무음 시도의 오류 코드가 남아 있어도 정상 화면
+REGISTER_HOST = "mysignins.microsoft.com"
+# Entra MFA 등록 화면: QR 코드 이미지와 비밀 키 글자를 흐리게(글자 자체는 그대로 두어 스크립트가 읽을 수 있게)
+SECRET_MASK_JS = """() => {
+  if (location.hostname !== 'mysignins.microsoft.com') return;
+  const re = /^[a-z2-7]{16,64}$/i;
+  const fix = (n) => { const t = (n.nodeValue || '').trim();
+    if (t.length >= 16 && re.test(t) && /[2-7]/.test(t) && n.parentElement) n.parentElement.style.filter = 'blur(9px)'; };
+  const walk = (root) => { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) fix(n); };
+  const start = () => {
+    const st = document.createElement('style');
+    st.textContent = 'img[alt*="스캔"], img[alt*="scan" i], img[alt*="QR" i] { filter: blur(18px) !important; }';
+    (document.head || document.documentElement).appendChild(st);
+    walk(document.documentElement);
+    new MutationObserver((ms) => { for (const m of ms) { if (m.type === 'characterData') fix(m.target);
+      else m.addedNodes.forEach((n) => n.nodeType === 3 ? fix(n) : (n.nodeType === 1 && walk(n))); } })
+      .observe(document.documentElement, {subtree: true, childList: true, characterData: true}); };
+  if (document.documentElement) start(); else document.addEventListener('DOMContentLoaded', start);
+}"""
 MASK_JS = """(rules) => {
   const res = rules.map(([p, f, r]) => [new RegExp(p, f), r]);
   const fix = (n) => { let t = n.nodeValue; if (!t) return; const o = t; for (const [re, r] of res) t = t.replace(re, r);
@@ -242,7 +270,7 @@ class Run:
             m = re.search(r"AADSTS(\d+)", res.get("desc", ""))
             res["code"] = m.group(1) if m else None
             res["desc"] = res.get("desc", "").split("\r\n")[0].split("\n")[0][:220]
-        res.update({k: self.trace.get(k) for k in ("password", "mfa", "chose")})
+        res.update({k: self.trace.get(k) for k in ("password", "mfa", "chose", "registered")})
         self.results[state] = res
         return self.result_page(res)
 
@@ -255,10 +283,12 @@ class Run:
             head = "<div class='row bad' style='font-size:30px;font-weight:700'>⛔ 로그인 실패</div>"
             rows = [("오류", f"AADSTS{res.get('code')} {STS_TEXT.get(res.get('code') or '', '')}" if res.get("code")
                      else res.get("error")), ("Microsoft 응답", res.get("desc"))]
-        rows += [("SEN 비밀번호 입력", "예" if res.get("password") else "아니오(SEN 세션 사용)"),
-                 ("SEN 2단계 인증", "예" if res.get("mfa") else "아니오")]
+        rows.append(("SEN 비밀번호 입력", "예" if res.get("password") else "아니오(SEN 세션 사용)"))
         if res.get("chose"):
             rows.append(("SEN 학교 선택", res["chose"]))
+        if res["result"] == "success":
+            rows.append(("Microsoft MFA(Entra)", ("인증 앱 등록 후 코드 입력" if res.get("registered") else "인증 앱 코드 입력")
+                         if res.get("mfa") else "요구되지 않음"))
         body = ("<div class='wrap' style='padding:56px 80px'><div style='font-size:20px;opacity:.6'>시험용 앱 · Microsoft 공개 클라이언트</div>"
                 "<h1 style='margin:12px 0 28px'>앱 로그인 결과</h1>" + head +
                 "<table style='margin-top:20px'>" + "".join(f"<tr><th style='width:300px'>{esc(k)}</th><td>{esc(v)}</td></tr>"
@@ -271,6 +301,7 @@ class Run:
         opts = ", ".join(f"{k}={v}" for k, v in kw.items() if k in ("domain_hint", "prompt") and v)
         self.step(label or f"앱 로그인 시작: {upn or '(힌트 없음)'}{' 직접 입력' if typed else ''}{' · ' + opts if opts else ''}")
         self.new_trace()  # 무음 로그인은 goto 직후 바로 결과가 오므로 미리 초기화
+        self.auth_url = url
         self.page.goto(url, wait_until="commit")
         out = self.drive(typed=upn if typed else None, idp_user=idp_user or (upn or "").split("@")[0], choose=choose,
                          state=state, account=upn)
@@ -279,11 +310,11 @@ class Run:
 
     # ---- 사람이 하는 순서대로 화면 진행
     def new_trace(self):
-        self.trace = {"password": False, "mfa": False, "chose": None}
+        self.trace = {"password": False, "mfa": False, "chose": None, "registered": False}
 
     def drive(self, *, typed=None, idp_user=None, choose=None, state=None, app=None, account=None, timeout=150):
         page, tr = self.page, self.trace
-        seen_login, typed_done, mfa_tries, done_pages, last_url = False, False, 0, set(), None
+        seen_login, typed_done, otp_tries, done_pages, last_url = False, False, 0, set(), None
         deadline = time.time() + timeout
         while time.time() < deadline:
             page.wait_for_timeout(600)
@@ -344,6 +375,44 @@ class Run:
                     continue
                 if pgid in ("KmsiInterrupt", "CmsiInterrupt"):
                     continue
+                who = ((cfg or {}).get("user") or account or "").lower()
+                if pgid == "ConvergedTFA" and who in self.rec.totp:
+                    otc = page.locator("#idTxtBx_SAOTCC_OTC")
+                    err = page.locator("#idSpan_SAOTCC_Error_OTC")
+                    try:
+                        ready = otc.count() and otc.first.is_visible() and (
+                            otp_tries == 0 or (err.count() and err.first.is_visible()))
+                    except Exception:  # noqa: BLE001
+                        ready = False
+                    if ready and otp_tries < 3:
+                        page.wait_for_timeout(1500)
+                        otc.first.click()
+                        otc.first.fill("")
+                        otc.first.press_sequentially(totp_now(who, self.rec.totp[who]), delay=120)
+                        page.wait_for_timeout(500)
+                        self._click(["#idSubmit_SAOTCC_Continue", "input[type=submit]"])
+                        tr["mfa"] = True
+                        otp_tries += 1
+                        self.step("Microsoft MFA: 인증 앱 6자리 코드 입력" if otp_tries == 1
+                                  else "Microsoft MFA: 코드 거부(이미 쓴 코드) → 다음 코드 입력")
+                        page.wait_for_timeout(2500)
+                    continue
+                if pgid == "ConvergedProofUpRedirect" and (cfg or {}).get("campaign") and ("later", url) not in done_pages:
+                    later = page.get_by_text(re.compile(r"^(나중에|Ask later|Not now|Skip for now)$"))
+                    if later.count() and later.first.is_visible():
+                        done_pages.add(("later", url))
+                        page.wait_for_timeout(2000)
+                        later.first.click()
+                        self.step("등록 캠페인(패스키·Authenticator 등록 권유): 나중에")
+                        continue
+                if (pgid == "ConvergedProofUpRedirect" and self.sc.get("register") and who not in self.rec.totp
+                        and ("proofup", url) not in done_pages):
+                    done_pages.add(("proofup", url))
+                    page.wait_for_timeout(2500)
+                    self._click(["#idSubmit_ProofUp_Redirect", "input[type=submit]"])
+                    self.reg_user = who
+                    self.step("Microsoft: MFA 수단 등록 요구(계정을 안전하게 유지) → 다음")
+                    continue
                 code = (cfg or {}).get("sts") or (re.search(r"AADSTS(\d+)", msg).group(1) if "AADSTS" in msg else None)
                 if code in TRANSIENT:
                     continue  # 기기 SSO 확인 같은 중간 화면: 페이지 스크립트가 알아서 다음으로 넘어감
@@ -378,11 +447,12 @@ class Run:
                     if page.url != url:
                         continue  # 오류 코드를 담은 중간 화면(앱이 처리)이 다음 화면으로 넘어감
                     code = code or (cfg.get("err") if pgid in ERROR_PAGES else None)
+                    page.wait_for_timeout(3000)  # 느린 연결(Tor)에서 차단 화면 글자가 그려진 뒤를 포스터로
                     self.mark("key")
                     if DEBUG:
                         print(f"  · 오류 화면 pgid={pgid} code={code}", flush=True)
                     self.step(f"Microsoft 차단·오류 화면(AADSTS{code})")
-                    page.wait_for_timeout(4500)
+                    page.wait_for_timeout(2000)
                     return {"result": "blocked", "code": code, "pgid": pgid, "desc": msg.split("\n")[0][:220],
                             "password": tr["password"], "mfa": tr["mfa"], "chose": tr["chose"]}
                 if account and pgid not in ("KmsiInterrupt", "CmsiInterrupt"):
@@ -396,6 +466,18 @@ class Run:
                             continue
                     except Exception:  # noqa: BLE001
                         pass
+            elif host == REGISTER_HOST and self.sc.get("register"):
+                seen_login = True
+                state_ = self.register_wizard(getattr(self, "reg_user", None) or (account or "").lower())
+                if state_ == "restart":
+                    self.step("두 번째 단계(앱 암호)는 만들지 않고 나감 → 앱 로그인 다시 시작")
+                    page.goto(self.auth_url, wait_until="commit")
+                    continue
+                if state_ != "left":
+                    self.mark("key")
+                    if DEBUG:
+                        print(f"  · 등록 실패 단계: {state_}", flush=True)
+                    return {"result": "register_failed", "stage": state_}
             elif host == LOGIN_HOST:
                 seen_login = True
                 pw_box = page.locator("#password")
@@ -432,18 +514,6 @@ class Run:
                     tr["chose"] = self.rec.school_of_domain(pick)
                     self.step(f"SEN 학교 선택: {tr['chose']}")
                     continue
-                code_box = page.locator("input[name=code]")
-                if code_box.count() and mfa_tries < 3 and (mfa_tries == 0 or page.locator(".alert").count()):
-                    page.wait_for_timeout(1000)
-                    code_box.fill("")
-                    code_box.press_sequentially(totp_now(idp_user, self.rec.totp[idp_user]), delay=120)
-                    page.wait_for_timeout(500)
-                    page.locator("button[type=submit]").first.click()
-                    tr["mfa"] = True
-                    mfa_tries += 1
-                    self.step("SEN 2단계 인증(인증 앱 6자리)")
-                    page.wait_for_timeout(1500)
-                    continue
                 msg = page.locator("p.sub")
                 if msg.count() and not page.locator("form").count():
                     self.mark("key")
@@ -456,6 +526,90 @@ class Run:
             except Exception:  # noqa: BLE001
                 pass
         return {"result": "timeout", "url": f"{urlparse(page.url).netloc}{urlparse(page.url).path}"}
+
+    def register_wizard(self, upn):
+        """Microsoft 등록 화면(My Sign-ins)에서 타사 인증 앱(TOTP)을 등록한다.
+        돌려주는 값: left(등록 화면을 벗어남), restart(두 번째 단계가 앱 암호라 나감), 그 밖은 실패 단계."""
+        page = self.page
+        nxt = page.locator("[data-testid=reskin-step-next-button]")
+        code_box = page.locator("[data-testid=verification-entercode-input]")
+        app_pw = page.get_by_text(re.compile("앱 암호 이름|app password", re.I))
+
+        st = {"code_done": False}
+
+        def ready():  # 다음 버튼이 켜졌거나, 입력이 필요한 화면(코드 입력 전·등록 뒤 앱 암호)이 떴는지
+            checks = [(nxt, "enabled")]
+            if not st["code_done"]:
+                checks.append((code_box, "visible"))
+            if self.trace.get("registered"):
+                checks.append((app_pw, "visible"))
+            for loc, need in checks:
+                try:
+                    if loc.count() and (loc.first.is_enabled() if need == "enabled" else loc.first.is_visible()):
+                        return True
+                except Exception:  # noqa: BLE001
+                    pass
+            return False
+
+        for _ in range(30):
+            for _ in range(60):
+                page.wait_for_timeout(500)
+                if urlparse(page.url).netloc != REGISTER_HOST:
+                    return "left"
+                if ready():
+                    break
+            page.wait_for_timeout(1500)
+            try:
+                body = page.locator("body").inner_text(timeout=5000)
+                head = " ".join(t.strip() for t in page.locator("[data-testid=reskin-step-title], h1, h2").all_inner_texts()
+                                if t.strip())[:80]
+            except Exception:  # noqa: BLE001
+                continue
+            other_rx = re.compile("다른 인증 앱 설정|different authenticator app", re.I)
+            other = page.get_by_role("link", name=other_rx).or_(page.get_by_role("button", name=other_rx))  # role=link 버튼
+            qr = page.locator("[data-testid='activation-qr-show/hide-info-button']")
+            if self.trace.get("registered") and re.search(r"앱 암호|app password", body, re.I):
+                page.wait_for_timeout(2500)
+                return "restart"
+            if upn not in self.rec.totp and re.search(r"Microsoft Authenticator", head or body):
+                try:  # 첫 화면: '다른 인증 앱 설정' 버튼은 '다음'보다 늦게 그려진다(Microsoft Authenticator 경로로 가지 않도록)
+                    other.first.wait_for(state="visible", timeout=15000)
+                except Exception:  # noqa: BLE001
+                    return "no_other_app_option"
+            if upn not in self.rec.totp and other.count() and other.first.is_visible():
+                page.wait_for_timeout(1500)
+                other.first.click()
+                self.step("등록 화면: Microsoft Authenticator 대신 '다른 인증 앱 설정'")
+                continue
+            if upn not in self.rec.totp and qr.count() and qr.first.is_visible():
+                page.wait_for_timeout(2500)
+                qr.first.click()
+                page.wait_for_timeout(1500)
+                m = re.search(r"(?:비밀 키|Secret key)\s*[:：]?\s*([A-Za-z2-7]{16,})", page.locator("body").inner_text(timeout=5000))
+                if not m:
+                    return "secret_not_found"
+                self.rec.save_secret(upn, m.group(1).upper())
+                self.step("인증 앱에 계정 추가(비밀 키 수동 입력, 영상에서는 QR·키를 흐리게 처리)")
+                page.wait_for_timeout(3000)
+                nxt.first.click()
+                continue
+            if upn in self.rec.totp and not st["code_done"] and code_box.count() and code_box.first.is_visible():
+                st["code_done"] = True
+                code_box.first.click()
+                code_box.first.press_sequentially(totp_now(upn, self.rec.totp[upn]), delay=120)
+                page.wait_for_timeout(600)
+                nxt.first.click()
+                self.trace.update(mfa=True, registered=True)
+                self.step("인증 앱 6자리 코드로 등록 확인")
+                continue
+            if nxt.count() and nxt.first.is_enabled():
+                label = (nxt.first.inner_text() or "").strip()
+                page.wait_for_timeout(1500)
+                nxt.first.click()
+                self.step(f"등록 화면: {head} → {label}")
+                continue
+            return f"stuck:{head}"
+        return "too_many_steps"
 
     def _click(self, selectors):
         for sel in selectors:
@@ -510,7 +664,7 @@ def success_line(out):
         extra.append(f"학교 선택 {out['chose']}")
     extra.append("SEN 비밀번호 입력" if out.get("password") else "SEN 비밀번호 입력 없음")
     if out.get("mfa"):
-        extra.append("SEN 2단계 인증")
+        extra.append("Microsoft MFA 등록·코드 입력" if out.get("registered") else "Microsoft MFA 코드 입력")
     return f"<span class='ok'>✅ 성공</span> — {esc(out.get('user'))} · 토큰 테넌트 {esc(out.get('school'))} ({esc(', '.join(extra))})"
 
 
@@ -638,11 +792,16 @@ def scenarios(rec):
         "두 번째 학교는 SEN 비밀번호를 다시 묻지 않는지", "둘 다 성공, 학교 B는 비밀번호 입력 없음",
         chain(("학교 A", lambda r: r.cli(f"multi01@{D1}"), expect_success(f"multi01@{D1}", A, password=True)),
               ("학교 B", lambda r: r.cli(f"multi01@{D2}"), expect_success(f"multi01@{D2}", B, password=False))))
-    add("C7", "sso", "학교 A의 MFA 필수 계정", [("계정", f"mfa01@{D1}"), ("Entra", "사용자별 MFA 적용")],
-        "SEN 2단계 인증 결과(MFA 클레임)로 Entra의 MFA 요구가 충족되는지", "성공(학교 A), SEN 2단계 인증",
+    add("C6", "sso", "MFA 대상 계정의 첫 로그인: Microsoft MFA 등록", [("계정", f"teacher01@{D1}"),
+                                                                ("Entra", "사용자별 MFA(녹화 동안만 적용), 등록한 인증 수단 없음")],
+        "SEN 로그인 뒤 Microsoft 화면에서 인증 앱을 등록하고 로그인이 끝나는지(QR·비밀 키는 흐리게 처리)",
+        "등록 후 성공(학교 A), Microsoft MFA",
+        one(lambda r: r.cli(f"teacher01@{D1}"), expect_success(f"teacher01@{D1}", A, mfa=True)), register=True)
+    add("C7", "sso", "학교 A의 MFA 필수 계정", [("계정", f"mfa01@{D1}"), ("Entra", "사용자별 MFA 적용, 인증 앱 등록됨")],
+        "SEN 로그인(1차 인증) 뒤 Microsoft가 MFA(인증 앱 코드)를 직접 요구하는지", "성공(학교 A), Microsoft MFA",
         one(lambda r: r.cli(f"mfa01@{D1}"), expect_success(f"mfa01@{D1}", A, mfa=True)))
-    add("C8", "sso", "학교 B의 MFA 필수 계정", [("계정", f"mfa02@{D2}"), ("Entra", "사용자별 MFA 적용")],
-        "다른 테넌트에서도 SEN 2단계 인증으로 MFA 요구가 충족되는지", "성공(학교 B), SEN 2단계 인증",
+    add("C8", "sso", "학교 B의 MFA 필수 계정", [("계정", f"mfa02@{D2}"), ("Entra", "사용자별 MFA 적용, 인증 앱 등록됨")],
+        "다른 테넌트에서도 Microsoft가 MFA를 직접 요구하는지", "성공(학교 B), Microsoft MFA",
         one(lambda r: r.cli(f"mfa02@{D2}"), expect_success(f"mfa02@{D2}", B, mfa=True)))
     add("F1", "sso", "앱이 재인증(prompt=login)을 요구할 때", [("계정", f"teacher01@{D1}")],
         "재인증 요구가 SEN에 전달되는지(전달되지 않으면 SEN 세션으로 통과)", "관찰: 비밀번호 입력 없이 통과",
@@ -710,7 +869,7 @@ def scenarios(rec):
         "통합 아이디를 힌트로 넣은 앱 링크로 학교 B Microsoft 365에 들어가는지", "Microsoft 365 진입(학교 B)",
         portal_url("student02", f"https://www.office.com/?auth=2&login_hint={quote('student02@' + DR)}", f"student02@{D2}"))
     add("R12", "route", "MFA 필수 계정의 통합 아이디", [("계정", f"mfa02@{DR}")],
-        "통합 아이디로 들어와도 SEN 2단계 인증 후 학교 B로 가는지", "성공(학교 B), SEN 2단계 인증",
+        "통합 아이디로 들어와도 학교 B 계정에 Microsoft MFA가 적용되는지", "성공(학교 B), Microsoft MFA",
         one(lambda r: r.cli(f"mfa02@{DR}"), expect_success(f"mfa02@{D2}", B, mfa=True)))
     add("R13", "route", "SEN 아이디 그대로 입력(student01@joowon.me) → 학교 A", [("계정", f"student01@{DROOT}")],
         "SEN 아이디(@senedu.kr 역할)를 그대로 입력해도 학교 계정으로 로그인되는지", "성공(학교 A)",
@@ -734,11 +893,13 @@ def scenarios(rec):
     add("S1", "attack", "유출 계정으로 Tor 로그인 → 차단", [("계정", f"hack01@{D2}"), ("정책", "로그인 위험 시 차단")],
         "익명 IP 실시간 탐지 → 위험 기반 조건부 액세스 차단", "차단(AADSTS53003)",
         one(lambda r: r.app("myapps", typed=f"hack01@{D2}", idp_user="hack01"), expect_code("53003")), tor=True)
-    add("S2", "attack", "Tor 로그인 + SEN 2단계 인증 → 통과", [("계정", f"hack02@{D2}"), ("정책", "로그인 위험 시 MFA 요구")],
-        "SEN MFA 클레임이 위험 기반 MFA 요구를 충족해 통과되는지(고위험을 '차단'으로 둬야 하는 이유)", "내 앱 진입",
+    add("S2", "attack", "Tor 로그인 + Microsoft MFA → 통과", [("계정", f"hack02@{D2}"), ("정책", "로그인 위험 시 MFA 요구"),
+                                                          ("MFA", "Entra에 인증 앱 등록됨")],
+        "위험 로그인에 Microsoft가 MFA를 요구하고, 등록된 인증 앱으로 통과하면 위험이 해소되는지", "MFA 후 내 앱 진입",
         app_flow("myapps", f"hack02@{D2}"), tor=True)
-    add("S3", "attack", "Tor 로그인, SEN 2단계 인증 없음 → 차단", [("계정", f"hack04@{D2}"), ("정책", "로그인 위험 시 MFA 요구")],
-        "MFA를 충족할 수 없는 위험 세션이 차단되는지", "차단(AADSTS53004)",
+    add("S3", "attack", "Tor 로그인, MFA 수단 미등록 → 차단", [("계정", f"hack04@{D2}"), ("정책", "로그인 위험 시 MFA 요구"),
+                                                         ("MFA", "Entra에 등록한 수단 없음")],
+        "MFA를 할 수 없는 위험 세션이 차단되는지(위험 세션에서는 MFA 등록도 막힘)", "차단(AADSTS53004)",
         one(lambda r: r.app("myapps", typed=f"hack04@{D2}", idp_user="hack04"), expect_code("53004")), tor=True)
     add("S4", "attack", "관리자 침해 확인 → 기존 토큰 거부(CAE)·새 로그인 차단", [("계정", f"hack03@{D2}"),
                                                                      ("정책", "사용자 위험 높음 시 차단")],
@@ -746,6 +907,16 @@ def scenarios(rec):
         cae_flow)
     portal_scenarios(add)
     return S
+
+
+def register_scenario(rec, upn):
+    """--register: 등록만 하는 확인용 시나리오(게시 목록에는 없음)."""
+    upn = upn.lower()
+    school = rec.school_of(rec.tenant_of(upn.split("@")[1]))
+    return {"id": f"REG-{upn.split('@')[0]}", "group": "sso", "title": "Microsoft MFA 등록(확인용)",
+            "info": [("계정", upn)], "check": "등록 화면에서 인증 앱을 등록하고 로그인이 끝나는지",
+            "expect": "등록 후 성공", "register": True,
+            "fn": one(lambda r: r.cli(upn), expect_success(upn, school, mfa=True))}
 
 
 # ---------------------------------------------------------------- 관리 포털 화면
@@ -827,7 +998,7 @@ def portal_scenarios(add):
         portal_view(ENTRA_IP + "RiskDetections/fromNav/Identity", "보안데모", "익명 IP 주소 탐지(실시간)와 관리자 침해 확인 기록"),
         portal=True)
     add("V3", "portal", "Entra ID 보호: 위험한 사용자", [("화면", "Microsoft Entra 관리 센터 › ID 보호 › 위험한 사용자")],
-        "탐지가 사용자 위험으로 이어지고, SEN MFA로 해소된 계정은 위험이 남지 않는지", "데모 계정 위험 상태 표시",
+        "탐지가 사용자 위험으로 이어지고, Microsoft MFA로 해소된 계정은 위험이 남지 않는지", "데모 계정 위험 상태 표시",
         portal_view(ENTRA_IP + "RiskyUsers/fromNav/Identity", "보안데모", "데모 계정의 사용자 위험 수준·상태",
                     scroll_text="보안데모"), portal=True)
     add("V4", "portal", "조건부 액세스: 데모용 위험 기반 정책", [("화면", "Microsoft Entra 관리 센터 › 조건부 액세스 › 정책")],
@@ -931,8 +1102,9 @@ class Recorder:
         self.args = args
         self.password = os.environ.get("DEMO_PASSWORD") or (open(args.password_file, encoding="utf-8").read().strip()
                                                             if args.password_file else "")
-        raw = os.environ.get("DEMO_TOTP_JSON") or (open(args.totp_file, encoding="utf-8").read() if args.totp_file else "{}")
-        self.totp = {u: parse_qs(urlparse(x).query)["secret"][0] for u, x in json.loads(raw).items()}
+        raw = os.environ.get("DEMO_TOTP_JSON") or (open(args.totp_file, encoding="utf-8").read()
+                                                   if args.totp_file and os.path.exists(args.totp_file) else "{}")
+        self.totp = load_totp(raw)
         self.domains = json.load(open(args.domains, encoding="utf-8")) if os.path.exists(args.domains) else {}
         self.proxies = {"http": args.proxy, "https": args.proxy} if args.proxy else None
         self.out = args.out_dir
@@ -964,6 +1136,18 @@ class Recorder:
         port = urlparse(REDIRECT).port or 80
         server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def save_secret(self, upn, secret):
+        """Microsoft 등록 화면에서 받은 인증 앱 비밀값을 --totp-file 에 더한다(파일 권한 600)."""
+        self.totp[upn.lower()] = secret
+        path = self.args.totp_file
+        if not path:
+            raise SystemExit("등록한 비밀값을 저장하려면 --totp-file 이 필요합니다")
+        data = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+        data[upn.lower()] = secret
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
     def tenant_of(self, domain):
         return self.domains.get(domain, {}).get("tenantId", "organizations")
@@ -1000,6 +1184,8 @@ class Recorder:
             browser = pw.chromium.launch(headless=not self.args.headed,
                                          proxy={"server": self.args.proxy} if self.args.proxy else None)
             ctx = browser.new_context(**opts)
+            if sc.get("register"):
+                ctx.add_init_script(f"({SECRET_MASK_JS})()")
             page = ctx.new_page()
         run = Run(self, sc, ctx, page)
         self.current = run
@@ -1081,6 +1267,8 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--publish", help="시연 사이트 폴더(영상·포스터·data/manifest.json 복사)")
     ap.add_argument("--pending-reason", default="녹화 보류(다음 녹화 예정)")
+    ap.add_argument("--register", nargs="+", metavar="UPN",
+                    help="Entra MFA 등록만 실행(게시하지 않는 확인용 영상 REG-<아이디>를 out-dir에 남김)")
     a = ap.parse_args()
     if a.publish:
         a.password_file = a.password_file or os.devnull
@@ -1095,6 +1283,8 @@ def main():
         return
     picked = [sc for sc in scs if (sc["id"] in a.only if a.only else
                                    bool(sc.get("tor")) == bool(a.proxy) and bool(sc.get("portal")) == bool(a.portal_profile))]
+    if a.register:
+        picked = [register_scenario(rec, upn) for upn in a.register]
     if any(sc.get("portal") for sc in picked) and not a.portal_profile:
         raise SystemExit("관리 포털 시나리오는 --portal-profile 이 필요합니다")
     with sync_playwright() as pw:

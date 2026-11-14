@@ -3,7 +3,7 @@
 앱(공개 클라이언트)의 인증 코드 흐름을 흉내 내고, 결과 토큰의 테넌트·사용자를 확인한다.
 화면 자동화 없이 HTTP 요청만 쓰며, Microsoft 로그인 페이지의 $Config 값으로 다음 단계를 정한다.
 
-사용: python e2e_signin.py --password-file <IdP 테스트 비밀번호 파일> --totp-file <TOTP 비밀값 JSON>
+사용: python e2e_signin.py --password-file <IdP 테스트 비밀번호 파일> --totp-file <Entra 인증 앱 비밀값 JSON>
                            [--domains ../idp/data/domains.json] [--admin-token-file <비밀값 파일>]
                            [--only A1 R1 ...] [--out <결과 JSON>]
 """
@@ -39,7 +39,7 @@ def tenant_of(domain):
     return DOMAINS.get(domain, {}).get("tenantId", "organizations")
 
 
-TOTP_LAST = {}  # 아이디별 마지막으로 쓴 TOTP 구간(IdP가 같은 코드 재사용을 거부하므로 다음 구간까지 기다린다)
+TOTP_LAST = {}  # 계정별 마지막으로 쓴 TOTP 구간(같은 코드를 다시 쓰지 않도록 다음 구간까지 기다린다)
 
 
 def totp_now(uid, secret):
@@ -52,6 +52,14 @@ def totp_now(uid, secret):
     mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     o = mac[-1] & 0x0F
     return f"{(struct.unpack('>I', mac[o:o + 4])[0] & 0x7FFFFFFF) % 1000000:06d}"
+
+
+def load_totp(raw):
+    """Entra 인증 앱 비밀값 JSON(학교 계정 UPN → otpauth 주소 또는 base32 비밀값)."""
+    out = {}
+    for upn, v in json.loads(raw or "{}").items():
+        out[upn.lower()] = parse_qs(urlparse(v).query)["secret"][0] if v.startswith("otpauth://") else v
+    return out
 
 
 def b64url(data):
@@ -103,10 +111,47 @@ def error_info(cfg):
 
 class Browser:
     def __init__(self, password, totp):
+        """totp: Entra에 등록한 인증 앱 비밀값(학교 계정 UPN → base32). MFA는 Entra가 수행한다."""
         self.s = requests.Session()
         self.s.headers.update({"User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"})
         self.password = password
-        self.totp = totp
+        self.totp = {k.lower(): v for k, v in totp.items()}
+
+    def _entra_mfa(self, cfg, trace):
+        """Entra MFA(인증 앱 코드). 로그인 페이지 스크립트처럼 SAS BeginAuth → EndAuth → ProcessAuth 순서로 보낸다."""
+        user = (cfg.get("sPOST_Username") or "").lower()
+        methods = [p.get("authMethodId") for p in cfg.get("arrUserProofs") or []]
+        secret = self.totp.get(user)
+        if "PhoneAppOTP" not in methods or not secret:
+            trace["steps"].append(f"Entra MFA 요구({user}, 등록 수단 {methods or '없음'})")
+            return {"result": "entra_mfa_required", "user": user, "methods": methods}
+        headers = {"Content-Type": "application/json; charset=UTF-8", "canary": cfg.get("apiCanary") or "",
+                   "hpgrequestid": cfg.get("sessionId") or "", "hpgid": str(cfg.get("hpgid") or ""),
+                   "hpgact": str(cfg.get("hpgact") or ""), "client-request-id": cfg.get("correlationId") or ""}
+        begin = self.s.post(cfg["urlBeginAuth"], headers=headers, json={
+            "AuthMethodId": "PhoneAppOTP", "Method": "BeginAuth", "ctx": cfg.get("sCtx"), "flowToken": cfg.get("sFT")}).json()
+        if not begin.get("Success"):
+            return {"result": "entra_mfa_error", "stage": "BeginAuth", "value": begin.get("ResultValue")}
+        poll_start = int(time.time() * 1000)
+        end = {}
+        for attempt in range(3):
+            code = totp_now(user, secret)
+            end = self.s.post(cfg["urlEndAuth"], headers=headers, json={
+                "Method": "EndAuth", "SessionId": begin["SessionId"], "FlowToken": begin["FlowToken"], "Ctx": begin["Ctx"],
+                "AuthMethodId": "PhoneAppOTP", "AdditionalAuthData": code, "PollCount": attempt + 1}).json()
+            if end.get("Success"):
+                break
+            trace["steps"].append(f"Entra MFA 코드 거부({end.get('ResultValue')}), 다음 코드로 재시도")
+        if not end.get("Success"):
+            return {"result": "entra_mfa_error", "stage": "EndAuth", "value": end.get("ResultValue")}
+        trace["steps"].append(f"Entra MFA(인증 앱 코드, {user})")
+        trace["entraMfa"] = True
+        return self.s.post(cfg["urlPost"], allow_redirects=False, data={
+            "type": "19", "GeneralVerify": "false", "request": end.get("Ctx") or begin["Ctx"],
+            "mfaLastPollStart": str(poll_start), "mfaLastPollEnd": str(int(time.time() * 1000)),
+            "mfaAuthMethod": "PhoneAppOTP", "otc": code, "login": user,
+            "flowToken": end.get("FlowToken") or begin["FlowToken"], "hpgrequestid": cfg.get("sessionId") or "",
+            "sacxt": "", "hideSmsInMfaProofs": "false", "canary": cfg.get("canary") or "", "i19": "2000"})
 
     def sign_in(self, upn, *, domain_hint=None, prompt=None, idp_user=None, choose=None, tenant="organizations",
                 hint=True, pre_login=False, scope="openid profile offline_access", claims=None, keep_tokens=False):
@@ -147,7 +192,7 @@ class Browser:
                 outcome = {"result": "token_error", "error": tok.get("error"), "desc": (tok.get("error_description") or "")[:200]}
         outcome["steps"] = trace["steps"]
         outcome["idpLogin"] = trace["idpLogin"]
-        outcome["idpMfa"] = bool(trace.get("idpMfa"))
+        outcome["entraMfa"] = bool(trace.get("entraMfa"))
         if trace.get("company"):
             outcome["company"] = trace["company"]
         return outcome
@@ -159,7 +204,7 @@ class Browser:
         r = self.s.get(f"{IDP}/portal/launch?{urlencode({'domain': domain, 'app': app})}", allow_redirects=False)
         out = self._drive(r, None, idp_user, None, trace, stop_on_leave=True)
         out["steps"] = trace["steps"]
-        out["idpLogin"], out["idpMfa"] = True, bool(trace.get("idpMfa"))
+        out["idpLogin"], out["entraMfa"] = True, bool(trace.get("entraMfa"))
         return out
 
     def portal_link(self, idp_user, url):
@@ -168,7 +213,7 @@ class Browser:
         self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
         out = self._drive(self.s.get(url, allow_redirects=False), None, idp_user, None, trace)
         out["steps"] = trace["steps"]
-        out["idpLogin"], out["idpMfa"] = True, bool(trace.get("idpMfa"))
+        out["idpLogin"], out["entraMfa"] = True, bool(trace.get("entraMfa"))
         return out
 
     def _drive(self, r, upn, idp_user, choose, trace, stop_on_leave=False):
@@ -212,16 +257,6 @@ class Browser:
                 continue
 
             text = r.text
-            if host == IDP_HOST and 'name="code"' in text and "2단계 인증" in text:
-                form = first_form(text)
-                secret = self.totp.get(idp_user)
-                if not secret:
-                    return {"result": "mfa_secret_missing"}
-                trace["steps"].append(f"IdP 2단계 인증(TOTP, {idp_user})")
-                trace["idpMfa"] = True
-                r = self.s.post(urljoin(r.url, form["action"]), data={**form["fields"], "code": totp_now(idp_user, secret)},
-                                allow_redirects=False)
-                continue
             if host == IDP_HOST:
                 if "어느 학교로 로그인할까요" in text:
                     k = re.search(r'name="k" value="([^"]+)"', text).group(1)
@@ -252,6 +287,18 @@ class Browser:
                 if err.get("aadsts") or err.get("strServiceExceptionMessage"):
                     trace["steps"].append(f"ESTS 오류 페이지({pgid})")
                     return {"result": "aad_error", "pgid": pgid, **err}
+                if pgid == "ConvergedTFA":
+                    nxt = self._entra_mfa(cfg, trace)
+                    if isinstance(nxt, dict):
+                        return nxt
+                    r = nxt
+                    continue
+                if pgid == "ConvergedProofUpRedirect" and cfg.get("fIsRegistrationCampaignInterrupt") \
+                        and cfg.get("urlSkipMfaRegistration"):
+                    # 등록 캠페인: MFA를 마친 뒤 패스키나 Microsoft Authenticator 등록을 권하는 화면('나중에' 가능)
+                    trace["steps"].append("등록 캠페인(패스키·Authenticator 등록 권유): 나중에")
+                    r = self.s.post(cfg["urlSkipMfaRegistration"], data={"flowtoken": cfg.get("sFT")}, allow_redirects=False)
+                    continue
                 if pgid == "CmsiInterrupt":
                     # 도메인 확인 대화상자(Domain Confirmation Dialog). 사용자 이름 입력 없이 조용히 로그인될 때
                     # 로그인할 조직을 확인시키는 화면으로, SAML 응답을 받아들인 뒤에 뜬다.
@@ -316,8 +363,8 @@ SCENARIOS = [
     ("B2b", "서명 변조", "거부", lambda b: b.sign_in(f"badsig01@{D1}")),
     ("C1", "Entra 쪽 ImmutableID 없음(organizations 엔드포인트)", "거부", lambda b: b.sign_in(f"nomap01@{D1}")),
     ("C1b", "Entra 쪽 ImmutableID 없음(학교 A 테넌트 지정)", "거부", lambda b: b.sign_in(f"nomap01@{D1}", tenant=tenant_of(D1))),
-    ("C7", "학교 A의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 A), IdP 2단계 인증", lambda b: b.sign_in(f"mfa01@{D1}")),
-    ("C8", "학교 B의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 B), IdP 2단계 인증", lambda b: b.sign_in(f"mfa02@{D2}")),
+    ("C7", "학교 A의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 A), Entra MFA", lambda b: b.sign_in(f"mfa01@{D1}")),
+    ("C8", "학교 B의 MFA 필수 계정(Entra 사용자별 MFA)", "성공(학교 B), Entra MFA", lambda b: b.sign_in(f"mfa02@{D2}")),
     ("F0", "교사 로그인", "성공(학교 A)", lambda b: b.sign_in(f"teacher01@{D1}")),
     ("F1", "같은 브라우저, 앱이 prompt=login(재인증) 요구", "관찰", lambda b: b.sign_in(f"teacher01@{D1}", prompt="login")),
     ("R1", "4번: 통합 아이디 → 학교 B(다른 테넌트)", "관찰", lambda b: b.sign_in(f"student02@{DR}")),
@@ -351,7 +398,7 @@ SCENARIOS = [
      lambda b: b.portal_link("student02", f"https://www.office.com/?auth=2&login_hint=student02%40{DR}")),
     ("R11", "4번 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답(같은 테넌트 학교 A 계정)", "거부(AADSTS5000820)",
      lambda b: b.sign_in(f"teacher01@{DR}")),
-    ("R12", "4번: MFA 필수 계정의 통합 아이디 → 학교 B", "성공(학교 B), IdP 2단계 인증",
+    ("R12", "4번: MFA 필수 계정의 통합 아이디 → 학교 B", "성공(학교 B), Entra MFA",
      lambda b: b.sign_in(f"mfa02@{DR}")),
     ("R13", "4번: MS 로그인 화면에 IdP 아이디 그대로 입력(student01@joowon.me) → 학교 A", "성공(학교 A)",
      lambda b: b.sign_in(f"student01@{DROOT}", hint=False)),
@@ -373,9 +420,9 @@ def shared_pc(b):
 
 
 def ok_user(user, mfa=False):
-    """성공 + 기대한 학교 계정 + IdP 2단계 인증 여부(MFA 필수 계정만 True)."""
+    """성공 + 기대한 학교 계정 + Entra MFA 여부(MFA 필수 계정만 True)."""
     return lambda o: (o.get("result") == "success" and (o.get("user") or "").lower() == user.lower()
-                      and bool(o.get("idpMfa")) == mfa)
+                      and bool(o.get("entraMfa")) == mfa)
 
 
 def ok_error(code=None):
@@ -412,8 +459,7 @@ def main():
     DOMAINS.update(json.load(open(args.domains, encoding="utf-8")))
     schools = {v["tenantId"]: v.get("schoolName", d) for d, v in DOMAINS.items() if v.get("mode") == "school"}
     password = open(args.password_file, encoding="utf-8").read().strip()
-    totp = {uid: parse_qs(urlparse(uri).query)["secret"][0]
-            for uid, uri in json.load(open(args.totp_file, encoding="utf-8")).items()}
+    totp = load_totp(open(args.totp_file, encoding="utf-8").read())
 
     results, browser = [], None
     for sid, desc, expect, fn in SCENARIOS:
@@ -435,7 +481,7 @@ def main():
         summary = (out.get("tenant") or out.get("aadsts") or out.get("message") or out.get("pgid") or out.get("url")
                    or out.get("errorDescription", "")[:160])
         print(f"[{sid}] ({out['verdict']}) {desc}: {out.get('result')} {summary} {out.get('user') or ''} {out.get('app') or ''} "
-              f"(IdP 비밀번호 {'입력' if out.get('idpLogin') else '생략'}, IdP 2단계 {'예' if out.get('idpMfa') else '아니오'})")
+              f"(IdP 비밀번호 {'입력' if out.get('idpLogin') else '생략'}, Entra MFA {'예' if out.get('entraMfa') else '아니오'})")
         print("      " + " | ".join(out.get("steps", [])))
 
     if args.admin_token_file:

@@ -4,7 +4,7 @@
 #
 # 필요한 환경 변수
 #   SUB, RG                  컨테이너를 만들 Azure 구독·리소스 그룹
-#   PASSWORD_FILE, TOTP_FILE 데모 계정 비밀번호 파일, TOTP 비밀값 JSON(hack* 항목만 전달)
+#   PASSWORD_FILE, TOTP_FILE 데모 계정 비밀번호 파일, Entra 인증 앱 비밀값 JSON(hack* 계정 항목만 전달)
 # 선택
 #   ACCOUNTS (기본 "hack01 hack02 hack04"), REF(기본 main), LOCATION(기본 koreacentral), IMAGE(기본 python:3.12-slim)
 set -euo pipefail

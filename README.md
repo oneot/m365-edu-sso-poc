@@ -5,7 +5,7 @@
 
 > 테스트 전용입니다. 실제 업무 계정을 쓰지 마세요.
 
-**시연 영상: https://demo.joowon.me** — 로그인 성공·거부·④ 통합 아이디·위험 로그인 탐지와 차단을 헤드리스 Chromium으로 녹화한 영상입니다. 영상 끝 화면과 '실제 결과'는 받은 토큰(계정·테넌트)과 Microsoft 응답(오류 코드)에서 읽은 값입니다. 2026-11-13 Microsoft 365 서비스 장애로 Outlook·Microsoft 365 웹·Defender 화면이 필요한 일부 시나리오는 보류했습니다(사이트에 보류 목록 표시).
+**시연 영상: https://demo.joowon.me** — 로그인 성공·거부·④ 통합 아이디·위험 로그인 탐지와 차단을 헤드리스 Chromium으로 녹화한 영상입니다. 영상 끝 화면과 '실제 결과'는 받은 토큰(계정·테넌트)과 Microsoft 응답(오류 코드)에서 읽은 값입니다. MFA 역할 전환(SEN은 1차 인증, MFA는 Microsoft) 뒤 2026-11-14에 42개 시나리오를 모두 다시 녹화했습니다(V1만 2026-11-13 녹화). 첫 MFA 등록 화면(C6)의 QR 코드와 비밀 키는 흐리게 처리했습니다.
 
 ## 구성
 
@@ -35,25 +35,25 @@
 - **도메인별 Issuer**: Entra ID는 페더레이션 도메인마다 고유한 Issuer를 요구한다. IdP는 응답마다 `https://auth.joowon.me/saml/m365/<도메인>`을 Issuer로 쓴다.
 - **늘지 않는 것**: IdP 서버 대수, 서명 인증서(1개를 모든 도메인에 등록), Microsoft 쪽 SP 등록(1개).
 - **라우팅 실험**: 루트 `joowon.me`(IdP 아이디 도메인, SEN의 `@senedu.kr` 역할)와 `id.joowon.me`는 학생이 학교와 무관한 아이디로 앱에 로그인할 때 IdP가 학교 테넌트로 돌려 보내는 방식(문서에 없는 동작)을 시험하는 도메인이다. 둘 다 학교 A 테넌트(라우팅 테넌트 역할)에 페더레이션되어 있다. 결과는 아래 '④ 라우팅 도메인 심층 PoC' 절 참고.
-- **2단계 인증(TOTP)**: 계정에 `mfa` 플래그가 있으면(또는 학교 도메인에 `requireMfa: true`), IdP가 그 학교로 응답하기 전에 인증 앱 6자리 코드를 받는다(이미 통과한 세션은 생략, 같은 코드 재사용 불가). 실제로 통과한 세션에만 MFA 수행 표시(`multipleauthn`)를 넣는다.
-- **MFA 시나리오**: 테넌트는 기본적으로 MFA를 요구하지 않고, 테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA(`perUserMfaState: enforced`)로 MFA 필수다. IdP는 이 두 계정에만 2단계 인증을 하고 MFA 수행 표시를 보내 Entra의 요구를 충족한다.
+- **인증 역할**: SEN IdP는 1차 인증(아이디·비밀번호)만 한다. MFA 등 2차 인증은 모두 Entra가 학교 테넌트에 등록된 인증 수단으로 수행한다. 페더레이션 도메인마다 `federatedIdpMfaBehavior = rejectMfaByFederatedIdp`를 설정하고, IdP 응답의 `AuthnContextClassRef`는 항상 `PasswordProtectedTransport`다(MFA 수행 표시 `multipleauthn`을 보내지 않음).
+- **MFA 시나리오**: 테넌트는 기본적으로 MFA를 요구하지 않고, 테넌트마다 한 계정(`mfa01`, `mfa02`)만 Entra 사용자별 MFA(`perUserMfaState: enforced`)로 MFA 필수다. 이 두 계정과 보안 데모 `hack02`는 Entra에 타사 인증 앱(TOTP, 인증 방법 'Software OATH tokens')을 등록해 두었다. 학교 A는 이 인증 방법이 꺼져 있어 PoC에서 켰다.
 
 ## 테스트 계정 역할
 
 | IdP 아이디 | 연결 | 확인하려는 것 |
 |---|---|---|
 | `student01` | 학교 A | 기본 로그인 |
-| `teacher01` | 학교 A | 기본 로그인. 통합 아이디로 들어오면 일부러 라우팅 도메인 Issuer로 응답(R11) |
+| `teacher01` | 학교 A | 기본 로그인. 통합 아이디로 들어오면 일부러 라우팅 도메인 Issuer로 응답(R11). C6 녹화 동안만 사용자별 MFA를 켜서 Entra MFA 첫 등록 화면을 시연(등록한 인증 앱은 남아 있음) |
 | `student02` | 학교 B | 기본 로그인 |
 | `multi01` | 학교 A·B | 두 학교 SSO, 라우팅 시 학교 선택 |
-| `mfa01` | 학교 A | 학교 A의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증) |
-| `mfa02` | 학교 B | 학교 B의 MFA 필수 계정(Entra 사용자별 MFA + IdP 2단계 인증) |
+| `mfa01` | 학교 A | 학교 A의 MFA 필수 계정(Entra 사용자별 MFA, Entra에 인증 앱 등록) |
+| `mfa02` | 학교 B | 학교 B의 MFA 필수 계정(Entra 사용자별 MFA, Entra에 인증 앱 등록) |
 | `nomap01` | 학교 A | Entra 쪽 ImmutableID 없음 → 거부 |
 | `badissuer01` | 학교 A | 등록 안 된 Issuer → 거부 |
 | `badsig01` | 학교 A | 서명 변조 → 거부 |
 | `hack01` | 학교 B | 보안 데모 S1: 유출 계정으로 Tor 로그인 → 로그인 위험 정책(차단) |
-| `hack02` | 학교 B | 보안 데모 S2: Tor 로그인 + IdP 2단계 인증 → 로그인 위험 정책(MFA 요구) |
-| `hack04` | 학교 B | 보안 데모 S3: Tor 로그인, IdP 2단계 인증 없음 → 로그인 위험 정책(MFA 요구) |
+| `hack02` | 학교 B | 보안 데모 S2: Tor 로그인 → 로그인 위험 정책(MFA 요구) → Entra MFA(등록한 인증 앱)로 통과 |
+| `hack04` | 학교 B | 보안 데모 S3: Tor 로그인 → 로그인 위험 정책(MFA 요구), Entra에 등록한 MFA 수단 없음 |
 | `hack03` | 학교 B | 보안 데모 S4: 관리자 침해 확인 → 사용자 위험 정책(차단), CAE 세션 종료 |
 
 ## PoC 결과 (2026-11-12)
@@ -74,7 +74,7 @@
 | B2a | 등록 안 된 Issuer | 거부(AADSTS50107) |
 | B2b | 서명 변조 | 거부(AADSTS500069) |
 | C1 / C1b | Entra 쪽 ImmutableID 없음 | 거부(AADSTS90019 / 테넌트 지정 시 AADSTS90072) |
-| C7 / C8 | MFA 필수 계정(학교 A `mfa01`, 학교 B `mfa02`) | 성공. 이 두 계정만 IdP 2단계 인증을 거치고, 나머지 계정은 거치지 않음 |
+| C7 / C8 | MFA 필수 계정(학교 A `mfa01`, 학교 B `mfa02`) | 성공. SEN 로그인 뒤 Entra가 인증 앱 코드를 요구(2026-11-14 MFA 역할 전환 뒤 재시험). 나머지 계정은 MFA 없음 |
 | F0 → F1 | 앱이 재인증(prompt=login) 요구 | IdP에 전달되지 않음, IdP 세션으로 바로 통과 |
 | R1 | ④ 통합 아이디 → 학교 B(다른 테넌트) | 성공, 토큰 테넌트 = 학교 B |
 | R2 | ④ 통합 아이디 → 학교 A(같은 테넌트) | 성공 |
@@ -88,7 +88,7 @@
 
 - Entra는 IdP에 HTTP POST로 요청한다. 요청은 서명이 없고 NameID 형식은 persistent이며 ForceAuthn이 없다. 폼 값은 `SAMLRequest`, `RelayState`, `username`(login_hint)이다.
 - 사용자 이름 입력 없이 조용히 로그인되면(앱·포털 시작 + IdP 세션) Microsoft의 [도메인 확인 대화상자](https://support.microsoft.com/en-us/office/domain-confirmation-dialog)가 한 번 뜬다. 아이디를 직접 입력하면 뜨지 않는다.
-- Entra가 MFA를 요구하는 계정(조건부 액세스 또는 사용자별 MFA)에 IdP가 MFA 수행 표시를 보내지 않으면 Entra MFA 등록 화면으로 넘어가 로그인이 끝나지 않는다. 표시를 보내면 Entra 로그인 로그에 "MFA requirement satisfied by claim in the token"이 남는다.
+- MFA 역할(아래 'MFA 역할: Entra가 수행' 절): `rejectMfaByFederatedIdp`에서는 IdP가 MFA 수행 표시를 보내도 Entra가 무시하고 직접 MFA를 요구한다.
 - ④ 라우팅은 테넌트 A에 페더레이션한 도메인으로 시작한 로그인에 학교 B 도메인 Issuer로 답해도 학교 B로 로그인됐다. 문서에 없는 동작이므로 운영 채택 전에 Microsoft 확인이 필요하다.
 - `promptLoginBehavior`를 `nativeSupport`로 바꿔도 재인증 요구가 IdP에 전달되지 않았다. 재인증 주기는 IdP 세션 수명으로 통제해야 한다.
 - 인증서 교체는 next 사전 등록 → IdP 서명 전환 → 테넌트별 승격 순서로, 테넌트마다 시점을 맞추지 않아도 된다.
@@ -97,6 +97,37 @@
 앱 확인(사람이 직접): Teams·Outlook 앱 로그인 정상.
 
 남은 확인: Windows 기기 로그인(아래 'Windows 기기 로그인' 절), 조건부 액세스 로그인 빈도, 로그아웃(SLO).
+
+### MFA 역할: Entra가 수행(2026-11-14)
+
+```text
+학생 ─▶ SEN 로그인(아이디·비밀번호, 1차 인증) ─▶ 서명된 SAML 응답(AuthnContext = PasswordProtectedTransport)
+     ─▶ Entra: 이 로그인에 MFA가 필요한가?(조건부 액세스·사용자별 MFA·위험 기반 정책)
+          ├ 필요 없음 → 로그인 완료
+          ├ 필요, 등록한 수단 있음 → Microsoft 화면에서 MFA(인증 앱 코드 등) → 로그인 완료
+          └ 필요, 등록한 수단 없음 → Microsoft 등록 화면(My Sign-ins)에서 등록 → MFA → 로그인 완료
+```
+
+| 확인 | 결과 |
+|---|---|
+| 설정 전환 | 세 페더레이션 도메인(`school1`·`id`·`school2`)을 `acceptIfMfaDoneByFederatedIdp` → `rejectMfaByFederatedIdp`로 변경(Graph `PATCH /domains/{domain}/federationConfiguration/{id}`) |
+| IdP MFA 표시 무시 | 전환 25초 뒤, IdP가 TOTP를 받고 `multipleauthn`을 보낸 `mfa01` 로그인이 성공하지 않고 Entra MFA 등록 화면(`ConvergedProofUpRedirect`)으로 넘어감. 전환 전에는 같은 응답으로 로그인 성공 |
+| MFA 대상이 아닌 계정 | A1(`student01`)은 전환 뒤에도 MFA 없이 성공 |
+| 첫 등록(C6) | 등록한 수단이 없는 MFA 대상 계정은 로그인 중 Microsoft 등록 화면으로 넘어가 인증 앱을 등록한 뒤 로그인 완료 |
+| 등록 뒤 로그인(C7·C8·R12) | SEN 로그인 뒤 Microsoft 화면에서 인증 앱 6자리 코드 입력 → 성공. 통합 아이디(R12)도 학교 B 계정의 MFA가 적용됨 |
+| Entra 로그인 로그(`mfa01`·`mfa02`, beta `auditLogs/signIns`의 `authenticationDetails`) | 전환 전: "MFA requirement satisfied by claim provided by external provider"(IdP 클레임). 전환 직후 IdP가 MFA 표시를 보낸 로그인: 오류 50072 "MFA required in Azure AD". 등록 뒤: `OATH verification code` — "MFA completed in Azure AD". 같은 세션의 이후 로그인은 `Previously satisfied` — "MFA requirement satisfied by claim in the token"(Entra 세션)으로 남으므로, IdP 클레임 여부는 'external provider' 문구로 구분한다 |
+| IdP | MFA 화면·TOTP 비밀값을 없애고 1차 인증만 처리(`idp/` 2026-11-14) |
+
+확인한 동작
+
+- `rejectMfaByFederatedIdp`는 MFA가 필요한 로그인에만 Entra MFA를 요구한다. MFA 정책 대상이 아닌 계정은 이전과 같이 SEN 로그인만으로 끝난다.
+- 인증 수단은 학교 테넌트 계정마다 따로 등록된다. 여러 학교 계정이 있는 사용자(겸임교사)는 학교마다 등록해야 한다.
+- 등록 화면은 Microsoft Authenticator를 먼저 권한다. 타사 인증 앱('다른 인증 앱 설정')은 인증 방법 정책의 'Software OATH tokens'로 허용하며, 학교 A는 이 방법이 꺼져 있어 PoC에서 켰다.
+- 두 테넌트 모두 사용자별 MFA 계정의 등록 화면이 두 번째 단계로 앱 암호 생성을 요구했다(문서상 MFA 서비스 설정에서 앱 암호가 허용된 테넌트의 동작). 앱 암호는 만들지 않고 나갔고, 첫 단계(인증 앱) 등록은 유지됐다. Microsoft 문서상 앱 암호는 Entra가 직접 확인하므로 페더레이션(SEN)과 MFA를 거치지 않는다. 운영에서는 앱 암호 허용을 끄고 레거시 인증을 조건부 액세스로 차단한다.
+- 학교 B에서는 인증 앱으로 MFA를 마친 뒤 등록 캠페인 화면('계정을 안전하게 유지해 보겠습니다', '나중에' 선택 가능)이 떴다. 학교 B는 등록 캠페인이 'Microsoft 관리' 상태이고 패스키(FIDO2)가 켜져 있으며, 문서상 이 조합은 MFA를 마친 사용자에게 패스키 등록을 하루 1회, 횟수 제한 없이 권한다.
+- 임시 액세스 패스(TAP)를 발급한 사용자는 페더레이션 도메인이어도 SEN으로 가지 않고 Entra에서 로그인한다(Microsoft 문서). 등록·분실 대응에 쓸 수 있지만 SEN을 거치지 않는 로그인 경로가 되므로 발급 권한과 유효 시간을 통제한다.
+
+근거: [federatedIdpMfaBehavior](https://learn.microsoft.com/en-us/graph/api/resources/internaldomainfederation), [앱 암호](https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-app-passwords), [등록 캠페인](https://learn.microsoft.com/en-us/entra/identity/authentication/how-to-mfa-registration-campaign), [임시 액세스 패스](https://learn.microsoft.com/en-us/entra/identity/authentication/howto-authentication-temporary-access-pass)
 
 ## ④ 라우팅 도메인 심층 PoC (2026-11-12)
 
@@ -117,7 +148,7 @@ IdP ─ 학생 확인 → 학교 계정 찾기(여럿이면 선택) → 학교 �
 | R9 | 포털 링크 `domain_hint=라우팅 도메인`(IdP 로그인 상태) | 성공, 비밀번호 입력 없음 |
 | R10 | Microsoft 365 웹 링크 `login_hint=통합 아이디` | 성공 |
 | R11 | 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답 | 거부(AADSTS5000820, Federated Token Validation) |
-| R12 | MFA 필수 계정(`mfa02`)이 통합 아이디로 로그인 | 성공, IdP 2단계 인증 후 학교 B |
+| R12 | MFA 필수 계정(`mfa02`)이 통합 아이디로 로그인 | 성공, 학교 B 계정의 Entra MFA(인증 앱 코드) 후 학교 B |
 | R13 / R14 | Microsoft 로그인 화면에 IdP 아이디 그대로 입력(`student01@joowon.me`, `student02@joowon.me`) | 성공(학교 A / 학교 B), SEN 로그인 화면에 아이디가 미리 채워짐 |
 | R15 | 겸임교사 IdP 아이디 그대로(`multi01@joowon.me`) | 학교 선택 화면 뒤 성공(학교 B) |
 | 브라우저 | Outlook 웹(student02 → 학교 B), Teams 웹(multi01 → 학교 선택 → 학교 A), Microsoft 365 웹(포털 링크) | 모두 학교 계정으로 앱 진입(`tools/browser_route_demo.py`) |
@@ -167,20 +198,20 @@ SAML 2.0 IdP 계정으로 Windows 11에 로그인할 수 있다. 다만 **기기
 
 ## 운영 보안 기준(Microsoft 쪽)
 
-학교 테넌트 약 1,400개(계정 약 100만 개)를 IdP 하나에 페더레이션해 운영할 때 Microsoft 쪽에 갖출 보안 기준이다. SEN IdP 자체의 보안(자격 증명 보호, MFA, 서명키 보관)은 IdP 쪽 기준으로 따로 정한다.
+학교 테넌트 약 1,400개(계정 약 100만 개)를 IdP 하나에 페더레이션해 운영할 때 Microsoft 쪽에 갖출 보안 기준이다. SEN IdP 자체의 보안(자격 증명 보호, 비밀번호 공격 방어, 서명키 보관)은 IdP 쪽 기준으로 따로 정한다. MFA는 Entra가 수행한다(위 'MFA 역할: Entra가 수행' 절).
 
 ### 신뢰 구조의 변화
 
 | 항목 | 현재(학교별 Entra 계정) | 페더레이션 이후 |
 |---|---|---|
-| 자격 증명 확인 | 학교 테넌트의 Entra ID | SEN IdP |
-| Entra의 신뢰 근거 | 비밀번호·MFA를 직접 확인 | SEN 서명키로 서명된 SAML 토큰(Issuer, ImmutableID, MFA 클레임) |
+| 자격 증명 확인 | 학교 테넌트의 Entra ID | 1차 인증은 SEN IdP, MFA는 학교 테넌트의 Entra ID |
+| Entra의 신뢰 근거 | 비밀번호·MFA를 직접 확인 | 1차 인증: SEN 서명키로 서명된 SAML 토큰(Issuer, ImmutableID). MFA: Entra가 직접 확인(IdP의 MFA 클레임은 무시) |
 | Entra가 보는 신호 | 비밀번호 시도, 토큰, 로그인 환경 | 토큰, 로그인 환경(IP·기기·위치). 비밀번호 시도는 보이지 않음 |
-| 침해 영향 범위 | 계정·학교 단위 | 서명키나 IdP가 침해되면 페더레이션된 전 학교 테넌트 |
+| 침해 영향 범위 | 계정·학교 단위 | 서명키나 IdP가 침해되면 페더레이션된 전 학교 테넌트의 1차 인증. MFA를 요구받는 로그인은 Entra MFA에서 막힌다 |
 
 | 구분 | SEN IdP | Entra ID(학교 테넌트) |
 |---|---|---|
-| 인증 | 자격 증명 확인, MFA, 비밀번호 공격 방어 | IdP 토큰 검증(서명, Issuer, 도메인 일치) |
+| 인증 | 1차 인증(자격 증명 확인), 비밀번호 공격 방어 | IdP 토큰 검증(서명, Issuer, 도메인 일치), MFA(등록된 인증 수단) |
 | 키·설정 | 서명키 보관·교체·폐기 | 페더레이션 설정 보호(관리자 권한 통제, 변경 감시) |
 | 탐지·대응 | IdP 로그인 이상 탐지 | 토큰·로그인 위험 탐지, 위험 기반 차단, 세션 폐기 |
 
@@ -197,6 +228,7 @@ SAML 2.0 IdP 계정으로 Windows 11에 로그인할 수 있다. 다만 **기기
 
 | 위협 | 통제 | 기준 |
 |---|---|---|
+| 위조 토큰의 MFA 클레임 | `rejectMfaByFederatedIdp`: IdP 토큰에 MFA 클레임이 있어도 Entra가 무시하고 등록된 인증 수단으로 MFA를 요구(PoC 확인). MFA를 요구받는 로그인은 인증 수단 없이 통과할 수 없다 | 도메인 설정(라이선스 무관). MFA 요구는 조건부 액세스(P1) |
 | 서명키 탈취·토큰 위조 | ID 보호 `Token issuer anomaly`(SAML 토큰 발급자 침해 징후) → 사용자 위험 → 위험 기반 조건부 액세스로 차단. 사용자 위험이 높으면 CAE 지원 클라이언트에서 Exchange·SharePoint·Teams 접근이 수 분 안에 끊긴다 | P2 |
 | 유출 자격 증명으로 IdP 통과 | `Unfamiliar sign-in properties`·`Atypical travel`·`Verified threat actor IP`(실시간), `Malicious IP address` → 로그인 위험 정책으로 차단 | P2 |
 | 세션 토큰 재사용 | `Anomalous token` → 차단·세션 폐기 | P2 |
@@ -229,14 +261,15 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 
 ### 설계·운영 요구사항
 
-1. 고위험 로그인은 'MFA 요구'가 아니라 '차단'으로 설정한다. `federatedIdpMfaBehavior`가 `acceptIfMfaDoneByFederatedIdp`(이 PoC 설정)이면 IdP가 보낸 MFA 클레임이 Entra의 MFA 요구를 충족하므로, 위조 토큰에는 MFA 요구가 효과가 없다(Octo Tempest 기법). 보안 데모 S2에서 IdP MFA 클레임으로 위험 로그인이 통과하고 위험 탐지까지 자동 해소되는 것을 확인했다.
-2. 위험할 때 SEN IdP에 추가 인증을 요구하려면 `enforceMfaByFederatedIdp`와 SEN IdP의 추가 인증 처리가 필요하다(이 PoC에서 미검증).
-3. 비밀번호 기반 탐지(`Leaked credentials`, `Password spray`)는 비밀번호가 Entra에 없어 적용되지 않는다. 비밀번호 공격 방어는 SEN IdP가 맡는다.
-4. Microsoft 관리형 위험 정책은 P2 테넌트에 보고 전용으로 생성되고, 그대로 두면 30일 이후 자동으로 켜진다. 위험 로그인 정책은 MFA를 등록하지 않은 사용자의 위험 로그인을 차단하므로(보안 데모 S3), SEN MFA 클레임이 없는 학생에게 미치는 영향을 보고 전용 기간에 확인한다.
-5. P2 기능은 P2가 할당된 사용자에게 적용된다.
-6. 서명키는 정기적으로 교체하고(`nextSigningCertificate` 사전 등록 방식, 이 PoC에서 검증), 담당자가 바뀌면 폐기·재발급한다.
-7. A5 테넌트는 Defender 포털을 한 번 열어 Defender XDR을 켜고, Entra ID Protection 알림 수집을 'High and medium risk detections'로 바꾼다(기본값은 높음만). IdP MFA 클레임으로 위험이 해소되면 인시던트도 자동 종료되므로, 자동 종료된 익명 IP 인시던트도 검토한다(보안 데모 S5).
-8. 확인 필요
+1. 모든 페더레이션 도메인에 `federatedIdpMfaBehavior = rejectMfaByFederatedIdp`를 설정한다. MFA는 Entra가 등록된 인증 수단으로 수행하고 SEN IdP의 MFA 클레임은 무시되므로, 위조 토큰에 MFA 클레임을 넣는 기법(Octo Tempest)으로 MFA 요구를 우회할 수 없다. 이 PoC의 이전 설정(`acceptIfMfaDoneByFederatedIdp`)에서는 IdP MFA 클레임만으로 위험 기반 'MFA 요구'가 충족되고 위험 탐지까지 해소됐다(2026-11-12 보안 데모 S2).
+2. MFA 요구는 사용자별 MFA(레거시) 대신 조건부 액세스로 건다. MFA 적용 대상(예: 교직원·관리자 상시, 학생 위험 기반), 허용 인증 수단, 첫 등록 경로(로그인 중 등록 화면 또는 임시 액세스 패스), 분실 시 재설정 절차를 정한다. MFA를 요구받지 않는 로그인은 SEN 1차 인증만으로 끝나므로 위험 기반 정책(로그인 위험 → MFA 요구, 사용자 위험 높음 → 차단)은 전체 사용자에게 적용한다.
+3. 앱 암호 허용(MFA 서비스 설정)을 끄고 레거시 인증을 조건부 액세스로 차단한다. 앱 암호는 Entra가 직접 확인해 SEN과 MFA를 모두 거치지 않는다. PoC 두 테넌트는 허용 상태였다.
+4. 비밀번호 기반 탐지(`Leaked credentials`, `Password spray`)는 비밀번호가 Entra에 없어 적용되지 않는다. 비밀번호 공격 방어는 SEN IdP가 맡는다.
+5. Microsoft 관리형 위험 정책은 P2 테넌트에 보고 전용으로 생성되고, 그대로 두면 30일 이후 자동으로 켜진다. 위험 로그인 정책은 Entra MFA 수단을 등록하지 않은 사용자의 위험 로그인을 차단하므로(보안 데모 S3), 등록하지 않은 학생에게 미치는 영향을 보고 전용 기간에 확인한다.
+6. P2 기능은 P2가 할당된 사용자에게 적용된다.
+7. 서명키는 정기적으로 교체하고(`nextSigningCertificate` 사전 등록 방식, 이 PoC에서 검증), 담당자가 바뀌면 폐기·재발급한다.
+8. A5 테넌트는 Defender 포털을 한 번 열어 Defender XDR을 켜고, Entra ID Protection 알림 수집을 'High and medium risk detections'로 바꾼다(기본값은 높음만). 사용자가 Entra MFA로 위험을 해소하면 인시던트도 자동 종료되므로, 자동 종료된 익명 IP 인시던트도 검토한다(보안 데모 S5).
+9. 확인 필요
    - 학교 라이선스가 Microsoft 365 A3인지 Office 365 A3인지
    - AiTM 탐지의 문서상 요건(Microsoft 365 E5)이 A5에도 적용되는지
    - A5 학생 사용 혜택의 Defender for Office 365는 Plan 1이라 피싱 모의훈련 대상은 교직원
@@ -246,44 +279,45 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 - 위협: [Microsoft 디지털 방어 보고서 2025](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/bade/documents/products-and-services/en-us/security/Microsoft-Digital-Defense-Report-2025-v5-21Nov25.pdf)(p.17), [2026](https://aka.ms/Microsoft-Digital-Defense-Report-2026)(p.45·64·85), [Octo Tempest](https://www.microsoft.com/en-us/security/blog/2023/10/25/octo-tempest-crosses-boundaries-to-facilitate-extortion-encryption-and-destruction/), [Storm-0501(2024)](https://www.microsoft.com/en-us/security/blog/2024/09/26/storm-0501-ransomware-attacks-expanding-to-hybrid-cloud-environments/), [Storm-0501(2025)](https://www.microsoft.com/en-us/security/blog/2025/08/27/storm-0501s-evolving-techniques-lead-to-cloud-based-ransomware/), [쿠팡 조사 결과(과기정통부)](https://m.korea.kr/briefing/policyBriefingView.do?newsId=156744092), [교육부 2025 침해 통계](https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=105948&lev=0&searchType=null&statusYN=W&page=1&s=moe&m=020402&opType=N), [교육용 계정 집계(한국일보)](https://www.hankookilbo.com/news/article/A2026102217490005554), [PowerSchool(TechCrunch)](https://techcrunch.com/2025/01/17/malware-stole-internal-powerschool-passwords-from-engineers-hacked-computer/)
 - 기능·라이선스: [ID 보호 라이선스](https://learn.microsoft.com/en-us/entra/id-protection/overview-identity-protection), [위험 탐지 목록](https://learn.microsoft.com/en-us/entra/id-protection/concept-identity-protection-risks), [위험 기반 조건부 액세스](https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-risk-based-sign-in), [CAE](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation), [PIM 라이선스](https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals), [관리형 정책](https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies), [로그 보존](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention), [감사 활동 목록](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-audit-activities), [공격 자동 차단](https://learn.microsoft.com/en-us/defender-xdr/configure-attack-disruption), [Audit](https://learn.microsoft.com/en-us/purview/audit-solutions-overview), [교육용 A3](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-standard/standard-license)·[A5](https://learn.microsoft.com/en-us/microsoft-365/education/guide/0-start-advanced/advanced-license), [federatedIdpMfaBehavior](https://learn.microsoft.com/en-us/graph/api/resources/internaldomainfederation)
 
-## 보안 데모: 위험 로그인 탐지·차단(2026-11-12)
+## 보안 데모: 위험 로그인 탐지·차단(2026-11-12, MFA 역할 전환 뒤 2026-11-14 재실행)
 
-영상: [S0](https://demo.joowon.me/#S0) · [S1](https://demo.joowon.me/#S1) · [S2](https://demo.joowon.me/#S2) · [S3](https://demo.joowon.me/#S3) · [S4](https://demo.joowon.me/#S4) · [관리 포털](https://demo.joowon.me/#g-portal) (2026-11-13 녹화, 같은 시나리오 재실행)
+영상: [S0](https://demo.joowon.me/#S0) · [S1](https://demo.joowon.me/#S1) · [S2](https://demo.joowon.me/#S2) · [S3](https://demo.joowon.me/#S3) · [S4](https://demo.joowon.me/#S4) · [관리 포털](https://demo.joowon.me/#g-portal) (2026-11-14 녹화)
 
 학교 B 테넌트(Microsoft 365 A5, Entra ID P2 포함)에서 계정 유출을 가정한 로그인을 재현했다. 재현 방법은 Microsoft의 위험 시뮬레이션 방법(Tor 익명 IP, 관리자 침해 확인)을 따랐고, 데모용 조건부 액세스 정책은 데모 계정 그룹에만 적용했다. 익명 IP 탐지(위험 중간)가 확실히 정책에 걸리도록 데모 정책은 '낮음 이상'으로 두었다. 공격자는 SEN 아이디·비밀번호를 가진 것으로 가정하므로 SEN IdP 로그인은 모두 통과한다.
 
 | 계정 | 데모 정책(조건부 액세스) | 재현 |
 |---|---|---|
 | `hack01` | 로그인 위험 낮음 이상 → 차단 | Tor 경유 로그인 |
-| `hack02` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, IdP 2단계 인증까지 통과 |
-| `hack04` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, IdP 2단계 인증 없음 |
+| `hack02` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, Entra MFA(등록한 인증 앱 코드) 통과 |
+| `hack04` | 로그인 위험 낮음 이상 → MFA 요구 | Tor 경유 로그인, Entra에 등록한 MFA 수단 없음 |
 | `hack03` | 사용자 위험 높음 → 차단 | 평소 위치에서 로그인해 CAE 토큰을 받은 뒤 관리자가 침해 확인 |
 
 | ID | 시나리오 | 결과 | Microsoft 쪽 기록 |
 |---|---|---|---|
 | S0 | 대조군: 평소 위치에서 4개 계정 로그인 | 모두 성공 | 로그인 위험 없음, 데모 정책 미적용 |
 | S1 | `hack01` Tor 로그인 | 차단(AADSTS53003) | ID 보호 `anonymizedIPAddress` 실시간 탐지(위험 중간) → S1 정책 `failure` |
-| S2 | `hack02` Tor 로그인 + IdP 2단계 인증 | 로그인 성공 | 같은 탐지. 'MFA 요구'가 IdP MFA 클레임으로 충족되고, 탐지 3건이 `remediated`(`userPassedMFADrivenByRiskBasedPolicy`)로 자동 해소돼 사용자 위험이 남지 않음 |
-| S3 | `hack04` Tor 로그인, IdP 2단계 인증 없음 | 차단(AADSTS53004) | 위험 세션이라 MFA 등록이 막힘 → 정책 `failure`, 사용자 위험 중간으로 남음 |
-| S4 | `hack03` 관리자 침해 확인 | 만료까지 24시간 남은 CAE 토큰이 8.6분 뒤 거부(401 claims challenge). 새 토큰·새 로그인 차단(AADSTS530032) | `adminConfirmedUserCompromised`(위험 높음) → CAE 중요 이벤트, S4 정책 |
-| S5 | Defender XDR(A5): S1~S3 알림·인시던트 | 공격 약 3분 뒤 'Anonymous IP address' 알림이 사용자별 인시던트로 생성됨. `hack01`·`hack04` 인시던트는 활성, `hack02` 인시던트 3건은 자동으로 '해결됨' | Entra ID Protection 알림(`azureAdIdentityProtection`, 위험 중간). `hack02`는 IdP MFA 클레임으로 위험이 해소돼 인시던트도 자동 종료 |
+| S2 | `hack02` Tor 로그인 → Entra MFA(인증 앱 코드) | 로그인 성공 | 같은 탐지. S2·S3 정책이 Entra MFA를 요구했고(`success`), 코드 입력 뒤 탐지가 모두 `remediated`(`userPassedMFADrivenByRiskBasedPolicy`)로 해소돼 사용자 위험이 남지 않음 |
+| S3 | `hack04` Tor 로그인, Entra MFA 수단 없음 | 차단(AADSTS53004) | 위험 세션이라 MFA 등록이 막힘 → 정책 `failure`, 사용자 위험 중간으로 남음 |
+| S4 | `hack03` 관리자 침해 확인 | 만료까지 24시간 남은 CAE 토큰이 8.6분(11-12)·5.8분(11-14) 뒤 거부(401 claims challenge). 새 토큰·새 로그인 차단(AADSTS530032) | `adminConfirmedUserCompromised`(위험 높음) → CAE 중요 이벤트, S4 정책 |
+| S5 | Defender XDR(A5): S1~S3 알림·인시던트 | 공격 약 3~5분 뒤 'Anonymous IP address' 알림이 사용자별 인시던트로 생성됨. `hack01`·`hack04` 인시던트는 활성, `hack02` 인시던트는 모두 자동으로 '해결됨' | Entra ID Protection 알림(`azureAdIdentityProtection`, 위험 중간). `hack02`는 Entra MFA로 위험이 해소돼 인시던트도 자동 종료 |
 
 확인한 동작
 
 - 익명 IP 탐지는 실시간이라 로그인 중에 정책이 적용된다. Entra는 SEN 로그인 뒤 SAML 응답을 보낸 브라우저의 IP(Tor 출구)로 위험을 평가한다.
 - Tor 로그인(S1·S3)에서 이 데모 테넌트의 Microsoft 관리형 위험 재인증 정책(파트너·벤더용, 보고 전용)이 `reportOnlyInterrupted`로 기록됐다. 켜져 있었다면 재인증을 요구했을 것이다. 학교 테넌트(P2, 보안 기본값 꺼짐)에는 같은 성격의 관리형 정책 'Multifactor authentication and reauthentication for risky sign-ins'가 보고 전용으로 생성된다.
-- IdP MFA 클레임은 위험 기반 'MFA 요구'를 충족하고 위험도 해소한다(S2). 그래서 고위험은 '차단'으로 설정한다(운영 보안 기준 요구사항 1).
+- 위험 기반 'MFA 요구'는 Entra MFA로만 충족된다(`rejectMfaByFederatedIdp`). 사용자가 등록한 인증 앱으로 MFA를 마치면 위험이 해소된다(S2). 이전 설정(`acceptIfMfaDoneByFederatedIdp`, 2026-11-12)에서는 IdP MFA 클레임만으로 같은 정책이 충족되고 위험도 해소됐다.
+- Entra MFA 수단이 없는 계정은 위험 세션에서 등록도 할 수 없어 차단된다(S3). MFA 미등록 학생에게 위험 기반 'MFA 요구'를 적용하면 위험 로그인은 사실상 차단된다.
 - 관리자 침해 확인 뒤 Microsoft Graph도 CAE로 기존 토큰을 거부했다(8.6분). 위험 반영과 CAE 전파에 수 분이 걸린다.
 - Defender XDR은 관리자가 Defender 포털에 처음 들어가면 켜진다(이 테넌트는 약 30분 걸림). Entra ID Protection 알림 수집 기본값은 '높음만'(2025-12-11부터)이라, 위험 '중간' 탐지(익명 IP 등)를 인시던트로 보려면 설정 → Microsoft Defender XDR → Alert service settings에서 'High and medium risk detections'로 바꿔야 한다.
-- IdP MFA 클레임으로 위험이 해소되면 Defender XDR 인시던트도 자동으로 '해결됨'이 된다(S2·S5). 활성 목록만 보면 놓치므로, 자동 해결된 익명 IP 인시던트도 검토 대상에 넣는다.
-- S1~S3는 3회 실행(Tor 출구 IP는 매번 다름) 모두 같은 결과였다.
+- Entra MFA로 위험이 해소되면 Defender XDR 인시던트도 자동으로 '해결됨'이 된다(S2·S5). 활성 목록만 보면 놓치므로, 자동 해결된 익명 IP 인시던트도 검토 대상에 넣는다(비밀번호와 MFA 수단이 함께 탈취된 경우도 같은 모양으로 해결됨).
+- S1~S3는 2026-11-12에 3회, MFA 역할 전환 뒤 2026-11-14에 1회 실행했다(Tor 출구 IP는 매번 다름). S1·S3 결과는 같았다. 영상 카드의 출구 IP는 시작할 때 확인한 값이고, 로그인 중 Tor 회로가 바뀌면 Entra 기록의 IP와 다를 수 있다.
 - 새 계정으로 재현할 수 없는 탐지: 처음 보는 로그인 환경(30일 이력 필요), 비정상 이동(14일·10회 이력 필요). 토큰 발급자 이상, AiTM, 공격 자동 차단은 안전하게 재현할 방법이 없다(Microsoft 문서: 그 밖의 탐지는 안전하게 시뮬레이션할 수 없음).
 
 발표 시연 순서
 
 1. Tor Browser(조직이 Tor를 제한하면 가상 머신)로 `https://myapps.microsoft.com` 접속 → `hack01@school2.joowon.me` → SEN 로그인 → 차단 화면
 2. Entra 관리 센터 → ID 보호 → 위험한 로그인·위험 탐지에서 익명 IP 탐지, 로그인 로그의 조건부 액세스 탭에서 S1 정책 `failure` 확인
-3. `hack02`로 같은 순서 → 로그인 성공, 위험 탐지가 '수정됨'으로 바뀐 것 확인(고위험을 '차단'으로 두는 이유)
+3. `hack02`로 같은 순서 → Microsoft 코드 입력 화면에서 인증 앱 코드 입력(발표자 인증 앱에 `hack02` 비밀값을 미리 등록) → 로그인 성공, 위험 탐지가 '수정됨'으로 바뀐 것 확인
 4. 터미널에서 `security_demo.py cae --confirm` 실행 → 수 분 뒤 401, 새 로그인 차단
 5. Defender 포털 → 인시던트에서 사용자별 'Anonymous IP address involving one user' 확인(`hack01`·`hack04` 활성, `hack02` 자동 해결)
 6. 끝나면 `security_demo.py reset`으로 데모 계정 위험 해제(S4를 다시 하려면 먼저 실행)
@@ -306,11 +340,9 @@ pwsh -NoProfile -File tests/Test-Offline.ps1
 python tools/graph_token.py login <tenantId> <관리자 UPN>
 python tools/prep_tenant.py <tenantId> school1.example.edu
 
-# 테스트 데이터(비밀번호·해시·2단계 인증 비밀값은 저장소 밖에 보관)
-#   --totp-file 에 인증 앱 등록용 otpauth 주소가 저장된다
+# 테스트 데이터(비밀번호·해시는 저장소 밖에 보관)
 cp idp/data/domains.sample.json idp/data/domains.json   # 값 수정
-python tools/make_test_data.py --domains idp/data/domains.json --out-dir out --password-file ~/poc-test-password.txt \
-  --totp-file ~/poc-totp.json
+python tools/make_test_data.py --domains idp/data/domains.json --out-dir out --password-file ~/poc-test-password.txt
 
 # 테넌트 테스트 계정 생성·라이선스(ImmutableID는 graph 스크립트 SetImmutableId로 설정)
 python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=<skuPartNumber>
@@ -318,29 +350,37 @@ python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=<
 # 배포(Azure App Service). 서명 키·비밀값 경로는 환경 변수로 넘긴다.
 SUB=... RG=... APP=... KEYS_DIR=... SECRETS_FILE=... LOGIN_UI_URL=https://login.example.edu/ tools/deploy_idp.sh
 
-# 로그인 종단 시험(실제 테넌트)
-python tools/e2e_signin.py --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json --out out/e2e.json
+# Entra MFA 등록(MFA 필수 계정). 타사 인증 앱을 쓰려면 인증 방법 정책의 Software OATH tokens를 켠다.
+#   계정에 MFA 요구(사용자별 MFA 등)가 있어야 로그인 중 등록 화면이 뜬다. hack02처럼 요구가 없는 계정은
+#   등록하는 동안만 사용자별 MFA를 켠다(PATCH /beta/users/{id}/authentication/requirements).
+#   Microsoft 등록 화면을 따라가며 받은 비밀값을 --totp-file 에 저장한다(앱 암호 단계는 만들지 않고 나감).
+pip install playwright imageio-ffmpeg
+python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json \
+  --out-dir out/register --register mfa01@school1.example.edu mfa02@school2.example.edu
+
+# 로그인 종단 시험(실제 테넌트). Entra MFA 코드 입력까지 HTTP로 진행
+python tools/e2e_signin.py --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json --out out/e2e.json
 
 # ④ 실제 웹앱 브라우저 시연(헤드리스 Chrome, 임시 프로필, 단계별 화면 저장)
-pip install playwright
-python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json --out-dir out/route-demo
+python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --out-dir out/route-demo
 
 # 보안 데모(학교 B). 필요한 관리자 권한은 tools/security_demo.py 머리말 참고(GRAPH_EXTRA_SCOPES)
 python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=M365EDU_A5_STUDENT \
   --immutableid-csv out/immutableid.csv          # 페더레이션된 도메인에 데모 계정 생성
 python tools/security_demo.py setup              # 데모 그룹·조건부 액세스 정책
 python tools/security_demo.py attack --accounts hack01 hack02 hack03 hack04 \
-  --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json    # S0 대조군
-SUB=... RG=... PASSWORD_FILE=~/poc-test-password.txt TOTP_FILE=~/poc-totp.json \
+  --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json    # S0 대조군
+SUB=... RG=... PASSWORD_FILE=~/poc-test-password.txt TOTP_FILE=~/poc-entra-totp.json \
   tools/run_tor_attack.sh                        # S1~S3: Azure 컨테이너에서 Tor 경유 로그인(회사 기기에 Tor 설치 없음)
 python tools/security_demo.py cae --confirm --password-file ~/poc-test-password.txt   # S4
 python tools/security_demo.py report             # 위험 탐지·로그인 기록·Defender 알림
 python tools/security_demo.py reset              # 데모 계정 위험 해제
 
-# 시연 영상 녹화(헤드리스 Chromium → MP4·포스터·manifest). 비밀번호·TOTP는 파일 또는 DEMO_PASSWORD/DEMO_TOTP_JSON
-pip install imageio-ffmpeg "requests[socks]"
+# 시연 영상 녹화(헤드리스 Chromium → MP4·포스터·manifest). 비밀번호·Entra 인증 앱 비밀값은 파일 또는 DEMO_PASSWORD/DEMO_TOTP_JSON
+#   C6(첫 MFA 등록)은 등록한 수단이 없고 MFA 요구가 있는 계정이 필요하다(녹화 뒤 그 계정에는 인증 앱이 남음)
+pip install "requests[socks]"
 python tools/record_demos.py --list
-python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file ~/poc-totp.json --out-dir out/demo
+python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json --out-dir out/demo
 #   Tor 시나리오(S1~S3): Azure 컨테이너에서 Tor를 띄우고 SSH 터널(키 인증, Tor 포트만 전달)로 사용
 SUB=... RG=... KEY=~/tunnel-key tools/tor_tunnel.sh up        # 다른 터미널에서 유지
 python tools/record_demos.py ... --proxy socks5://127.0.0.1:9050
@@ -362,7 +402,7 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 ## 정리
 
 1. `graph/Invoke-SenM365Federation.ps1 -Mode Rollback`으로 페더레이션 해제
-2. 테스트 계정·도메인(`school1`·`school2`·`id` 하위 도메인, 루트 `joowon.me`) 삭제, 사용자별 MFA 해제
+2. 테스트 계정·도메인(`school1`·`school2`·`id` 하위 도메인, 루트 `joowon.me`) 삭제, 사용자별 MFA 해제(계정을 지우면 등록한 Entra 인증 앱도 함께 지워짐). 학교 A: 인증 방법 'Software OATH tokens'를 원래대로 끄기(PoC에서 켬), Entra 인증 앱 비밀값 파일 삭제
 3. 학교 B 테넌트: 파트너·벤더 MFA 정책 2개의 `ALL` 그룹 제외를 되돌리고 그룹 삭제
 4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
 5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `school1`, `school2`, `id`, `login`, 루트 TXT `MS=ms…`) 삭제

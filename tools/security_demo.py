@@ -3,8 +3,8 @@
 
 시나리오(계정 → 데모 정책 → 재현)
   S1 hack01  로그인 위험 시 차단       Tor(익명 IP)에서 로그인
-  S2 hack02  로그인 위험 시 MFA 요구   Tor에서 로그인, IdP가 2단계 인증 후 MFA 클레임을 보냄
-  S3 hack04  로그인 위험 시 MFA 요구   Tor에서 로그인, IdP 2단계 인증 없음
+  S2 hack02  로그인 위험 시 MFA 요구   Tor에서 로그인, Entra가 요구한 MFA를 인증 앱 코드로 통과
+  S3 hack04  로그인 위험 시 MFA 요구   Tor에서 로그인, Entra에 등록한 MFA 수단 없음
   S4 hack03  사용자 위험 높음 시 차단  정상 로그인으로 CAE 토큰을 받은 뒤 관리자가 침해 확인
 
 명령
@@ -19,7 +19,7 @@
 관리자 명령은 graph_token.py 토큰 캐시를 쓴다. GRAPH_EXTRA_SCOPES 에 다음 권한을 넣는다.
   setup·cleanup: Policy.ReadWrite.ConditionalAccess, Application.Read.All, Group.ReadWrite.All
   confirm·reset·report: IdentityRiskyUser.ReadWrite.All, IdentityRiskEvent.Read.All, SecurityAlert.Read.All
-비밀번호·TOTP는 --password-file/--totp-file 또는 환경 변수 DEMO_PASSWORD/DEMO_TOTP_JSON 으로 받는다.
+비밀번호·Entra 인증 앱 비밀값은 --password-file/--totp-file 또는 환경 변수 DEMO_PASSWORD/DEMO_TOTP_JSON 으로 받는다.
 """
 import argparse
 import base64
@@ -28,12 +28,11 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
 
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e2e_signin import AAD, CLIENT_ID, UA, Browser, jwt_claims  # noqa: E402
+from e2e_signin import AAD, CLIENT_ID, UA, Browser, jwt_claims, load_totp  # noqa: E402
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 DEMO = "SSO 보안 데모"
@@ -66,8 +65,7 @@ def load_secrets(a):
     if not password:
         raise SystemExit("비밀번호 필요: --password-file 또는 DEMO_PASSWORD")
     raw = os.environ.get("DEMO_TOTP_JSON") or (open(a.totp_file, encoding="utf-8").read() if a.totp_file else "{}")
-    totp = {uid: parse_qs(urlparse(uri).query)["secret"][0] for uid, uri in json.loads(raw).items()}
-    return password, totp
+    return password, load_totp(raw)
 
 
 def tenant_of(domain, domains_file):
@@ -188,7 +186,7 @@ def cmd_attack(a):
             out = {"result": "exception", "error": f"{type(e).__name__}: {e}"[:300]}
         out.update({"account": uid, "started": started, "egress": net, "via": "Tor" if a.proxy else "direct"})
         results.append(out)
-        print(f"[{stamp()}] {uid}: {summarize(out)} (IdP 2단계 인증: {'예' if out.get('idpMfa') else '아니오'})")
+        print(f"[{stamp()}] {uid}: {summarize(out)} (Entra MFA: {'예' if out.get('entraMfa') else '아니오'})")
         print("      " + " | ".join(out.get("steps", [])))
     if a.json:
         print("RESULT_JSON " + json.dumps(results, ensure_ascii=False))

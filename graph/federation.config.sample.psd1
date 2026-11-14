@@ -20,8 +20,9 @@
     # Federate 실행 때 값이 있으면 nextSigningCertificate로 함께 등록합니다.
     NextSigningCertificatePath            = ''
 
+    # MFA는 Entra가 수행한다(IdP가 보낸 MFA 클레임은 무시). PoC 확인: README '확인한 설정 동작'
     # acceptIfMfaDoneByFederatedIdp | enforceMfaByFederatedIdp | rejectMfaByFederatedIdp
-    FederatedIdpMfaBehavior               = 'acceptIfMfaDoneByFederatedIdp'
+    FederatedIdpMfaBehavior               = 'rejectMfaByFederatedIdp'
 
     # $true면 Entra가 AuthnRequest에 서명합니다. IdP가 서명 검증을 지원하면 PoC에서 켜 보세요.
     IsSignedAuthenticationRequestRequired = $false
