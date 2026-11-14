@@ -110,11 +110,11 @@
 
 | 확인 | 결과 |
 |---|---|
-| 설정 전환 | 세 페더레이션 도메인(`school1`·`id`·`school2`)을 `acceptIfMfaDoneByFederatedIdp` → `rejectMfaByFederatedIdp`로 변경(Graph `PATCH /domains/{domain}/federationConfiguration/{id}`) |
+| 설정 전환 | 페더레이션 도메인 4개(`school1`·`school2`·`id`·루트 `joowon.me`)를 `acceptIfMfaDoneByFederatedIdp` → `rejectMfaByFederatedIdp`로 변경(Graph `PATCH /domains/{domain}/federationConfiguration/{id}`). 루트 `joowon.me`는 2026-11-15에 변경 |
 | IdP MFA 표시 무시 | 전환 25초 뒤, IdP가 TOTP를 받고 `multipleauthn`을 보낸 `mfa01` 로그인이 성공하지 않고 Entra MFA 등록 화면(`ConvergedProofUpRedirect`)으로 넘어감. 전환 전에는 같은 응답으로 로그인 성공 |
 | MFA 대상이 아닌 계정 | A1(`student01`)은 전환 뒤에도 MFA 없이 성공 |
 | 첫 등록(C6) | 등록한 수단이 없는 MFA 대상 계정은 로그인 중 Microsoft 등록 화면으로 넘어가 인증 앱을 등록한 뒤 로그인 완료 |
-| 등록 뒤 로그인(C7·C8·R12) | SEN 로그인 뒤 Microsoft 화면에서 인증 앱 6자리 코드 입력 → 성공. 통합 아이디(R12)도 학교 B 계정의 MFA가 적용됨 |
+| 등록 뒤 로그인(C7·C8·R12) | SEN 로그인 뒤 Microsoft 화면에서 인증 앱 6자리 코드 입력 → 성공. 통합 아이디(R12)와 SEN 아이디 입력(`mfa02@joowon.me`, 2026-11-15)도 학교 B 계정의 MFA가 적용됨 |
 | Entra 로그인 로그(`mfa01`·`mfa02`, beta `auditLogs/signIns`의 `authenticationDetails`) | 전환 전: "MFA requirement satisfied by claim provided by external provider"(IdP 클레임). 전환 직후 IdP가 MFA 표시를 보낸 로그인: 오류 50072 "MFA required in Azure AD". 등록 뒤: `OATH verification code` — "MFA completed in Azure AD". 같은 세션의 이후 로그인은 `Previously satisfied` — "MFA requirement satisfied by claim in the token"(Entra 세션)으로 남으므로, IdP 클레임 여부는 'external provider' 문구로 구분한다 |
 | IdP | MFA 화면·TOTP 비밀값을 없애고 1차 인증만 처리(`idp/` 2026-11-14) |
 
