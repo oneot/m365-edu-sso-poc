@@ -501,8 +501,8 @@ class Run:
                     continue
             elif host == IDP_HOST:
                 seen_login = True
-                if path.startswith("/portal"):
-                    continue  # 포털 링크를 누른 뒤 다음 화면으로 넘어가는 중
+                if path.rstrip("/") == "":
+                    continue  # 로그인 뒤 Microsoft 365 웹으로 넘어가는 중
                 if page.locator("button[name=domain]").count():
                     pick = choose or page.locator("button[name=domain]").first.get_attribute("value")
                     page.wait_for_timeout(1500)
@@ -621,9 +621,9 @@ class Run:
                 pass
         return None
 
-    # ---- SEN 포털
+    # ---- SEN 로그인(앱 요청 없이 시작하면 IdP가 Microsoft 365 웹으로 바로 보낸다)
     def sen_login(self, idp_user):
-        self.step(f"SEN 포털 로그인({idp_user})")
+        self.step(f"SEN 로그인({idp_user})")
         self.page.goto(f"{IDP}/login", wait_until="commit")
         page = self.page
         page.wait_for_selector("#password", timeout=30000)
@@ -634,17 +634,7 @@ class Run:
         page.locator("#password").press_sequentially(self.rec.password, delay=40)
         page.wait_for_timeout(400)
         page.locator("button[type=submit]").first.click()
-        page.wait_for_url(f"{IDP}/portal**", timeout=30000)
-        page.wait_for_timeout(2500)
-
-    def portal_click(self, school, label, initiated=False):
-        sel = (f"section.tenant:has(h2:text-is('{school}')) a.btn{'.alt' if initiated else ':not(.alt)'}"
-               f":has-text('{label}')")
-        link = self.page.locator(sel).first
-        link.hover()
-        self.page.wait_for_timeout(900)
-        self.step(f"SEN 포털: {school} · {label}{' (IdP 시작)' if initiated else ''}")
-        link.click()
+        page.wait_for_url(lambda u: urlparse(u).hostname != IDP_HOST, timeout=30000)
 
     def app(self, name, *, typed=None, idp_user=None, account=None, choose=None, goto=True, url=None):
         self.new_trace()
@@ -738,10 +728,9 @@ def app_flow(name, typed_id, *, account=None, choose=None, idp_user=None):
     return run
 
 
-def portal_app(idp_user, school, label, account, initiated=False):
+def sen_land(idp_user, account):
     def run(r):
         r.sen_login(idp_user)
-        r.portal_click(school, label, initiated)
         out = r.app("m365", goto=False, idp_user=idp_user, account=account)
         r.result_lines.append(app_line(out, account))
         r.matched = expect_app(account)(out)
@@ -807,18 +796,12 @@ def scenarios(rec):
         chain(("첫 로그인", lambda r: r.cli(f"teacher01@{D1}"), expect_success(f"teacher01@{D1}", A, password=True)),
               ("prompt=login", lambda r: r.cli(f"teacher01@{D1}", prompt="login"),
                expect_success(f"teacher01@{D1}", A, password=False))))
-    add("P1", "sso", "SEN 포털 링크 → Microsoft 365 웹(학교 A)", [("계정", "student01 (SEN 포털)")],
-        "SEN 포털에서 학교 앱 링크를 누르면 비밀번호 없이 들어가는지", "Microsoft 365 진입(학교 A)",
-        portal_app("student01", A, "Microsoft 365", f"student01@{D1}"))
-    add("P2", "sso", "SEN 포털 링크 → Microsoft 365 웹(겸임교사, 학교 B)", [("계정", "multi01 (SEN 포털)")],
-        "여러 학교 소속이면 포털에서 학교별 링크로 들어가는지", "Microsoft 365 진입(학교 B)",
-        portal_app("multi01", B, "Microsoft 365", f"multi01@{D2}"))
-    add("I1", "sso", "SEN이 먼저 보내는 로그인(IdP 시작) → 학교 A", [("계정", "student01 (SEN 포털)")],
-        "요청 없이 보낸 SAML 응답을 Entra가 받아 주는지(문서에 없는 실험)", "Microsoft 365 진입(학교 A)",
-        portal_app("student01", A, "Microsoft 365", f"student01@{D1}", initiated=True))
-    add("I2", "sso", "SEN이 먼저 보내는 로그인(IdP 시작) → 학교 B", [("계정", "multi01 (SEN 포털)")],
-        "다른 테넌트에도 IdP 시작 로그인이 되는지", "Microsoft 365 진입(학교 B)",
-        portal_app("multi01", B, "Microsoft 365", f"multi01@{D2}", initiated=True))
+    add("P1", "sso", "SEN 로그인 → Microsoft 365 웹(학교 A)", [("계정", "student01 (SEN 로그인)")],
+        "SEN에 로그인하면 비밀번호를 다시 묻지 않고 학교 Microsoft 365로 바로 들어가는지", "Microsoft 365 진입(학교 A)",
+        sen_land("student01", f"student01@{D1}"))
+    add("P2", "sso", "SEN 로그인 → Microsoft 365 웹(학교 B)", [("계정", "student02 (SEN 로그인)")],
+        "다른 학교 테넌트 학생도 SEN 로그인만으로 바로 들어가는지", "Microsoft 365 진입(학교 B)",
+        sen_land("student02", f"student02@{D2}"))
     # 거부
     add("B2a", "reject", "등록되지 않은 Issuer로 보낸 응답", [("계정", f"badissuer01@{D1}")],
         "학교 도메인에 등록되지 않은 Issuer는 Entra가 거부하는지", "거부(AADSTS50107)",

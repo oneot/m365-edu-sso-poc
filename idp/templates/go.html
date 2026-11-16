@@ -1,0 +1,13 @@
+{% extends "_layout.html" %}
+{% block title %}Microsoft 365로 이동 중{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="0;url={{ href }}">{% endblock %}
+{% block body %}
+<div class="glass card">
+  {% include "_logo.html" %}
+  <div class="post">
+    <span class="spinner" aria-hidden="true"></span>
+    <p class="post-text" role="status">Microsoft 365로 이동하고 있습니다</p>
+    <a class="chip later" href="{{ href }}">계속</a>
+  </div>
+</div>
+{% endblock %}

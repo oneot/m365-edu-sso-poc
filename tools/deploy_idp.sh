@@ -13,7 +13,7 @@ set -euo pipefail
 : "${SUB:?}" "${RG:?}" "${APP:?}" "${KEYS_DIR:?}" "${SECRETS_FILE:?}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 IDP="$HERE/idp"
-for f in domains.json users.json links.json; do
+for f in domains.json users.json; do
   [ -f "$IDP/data/$f" ] || { echo "없음: $IDP/data/$f (tools/make_test_data.py 로 생성)"; exit 1; }
 done
 

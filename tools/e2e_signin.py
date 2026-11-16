@@ -196,12 +196,16 @@ class Browser:
             outcome["company"] = trace["company"]
         return outcome
 
-    def idp_initiated(self, idp_user, domain, app=0):
-        trace = {"steps": [], "idpLogin": False}
-        r = self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
-        trace["idpLogin"] = True
-        r = self.s.get(f"{IDP}/portal/launch?{urlencode({'domain': domain, 'app': app})}", allow_redirects=False)
-        out = self._drive(r, None, idp_user, None, trace, stop_on_leave=True)
+    def landing(self, idp_user):
+        """앱 요청 없이 SEN에 로그인했을 때(루트 1) IdP가 보내 주는 Microsoft 365 웹 주소를 따라간다."""
+        self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
+        page = self.s.get(f"{IDP}/", allow_redirects=False)
+        m = re.search(r'http-equiv="refresh" content="0;url=([^"]+)"', page.text)
+        if not m:
+            return {"result": "no_landing", "status": page.status_code, "steps": [], "idpLogin": True, "entraMfa": False}
+        url = html.unescape(m.group(1))
+        trace = {"steps": [f"SEN 로그인 → {urlparse(url).netloc}"], "idpLogin": True}
+        out = self._drive(self.s.get(url, allow_redirects=False), None, idp_user, None, trace)
         out["steps"] = trace["steps"]
         out["idpLogin"], out["entraMfa"] = True, bool(trace.get("entraMfa"))
         return out
@@ -215,7 +219,7 @@ class Browser:
         out["idpLogin"], out["entraMfa"] = True, bool(trace.get("entraMfa"))
         return out
 
-    def _drive(self, r, upn, idp_user, choose, trace, stop_on_leave=False):
+    def _drive(self, r, upn, idp_user, choose, trace):
         for _ in range(30):
             host = urlparse(r.url).netloc
             if r.status_code in (301, 302, 303, 307, 308):
@@ -241,8 +245,6 @@ class Browser:
                         data["k"] = k
                     r = self.s.post(f"{IDP}/login", data=data, allow_redirects=False)
                     continue
-                if stop_on_leave and lp.netloc not in ("login.microsoftonline.com", IDP_HOST):
-                    return {"result": "landed", "url": f"{lp.scheme}://{lp.netloc}{lp.path}"}
                 r = self.s.get(loc, allow_redirects=False)
                 continue
 
@@ -362,12 +364,8 @@ SCENARIOS = [
     ("R3", "4번: 겸임교사 통합 아이디 → 학교 B 선택", "관찰", lambda b: b.sign_in(f"multi01@{DR}", choose=D2)),
     ("R4", "4번: MS 로그인 화면에 통합 아이디 직접 입력 → 학교 B", "관찰",
      lambda b: b.sign_in(f"student02@{DR}", hint=False)),
-    ("P1", "IdP 포털 링크 → Microsoft 365 웹(학교 A)", "성공(학교 A)",
-     lambda b: b.portal_link("student01", f"https://www.office.com/?auth=2&login_hint=student01%40{D1}")),
-    ("P2", "IdP 포털 링크 → Microsoft 365 웹(학교 B)", "성공(학교 B)",
-     lambda b: b.portal_link("multi01", f"https://www.office.com/?auth=2&login_hint=multi01%40{D2}")),
-    ("I1", "IdP 시작(포털 버튼) → Microsoft 365, 학교 A", "관찰", lambda b: b.idp_initiated("student01", D1, 0)),
-    ("I2", "IdP 시작(포털 버튼) → Microsoft 365, 학교 B", "관찰", lambda b: b.idp_initiated("multi01", D2, 0)),
+    ("P1", "SEN 로그인 → Microsoft 365 웹으로 바로 이동(학교 A)", "성공(학교 A)", lambda b: b.landing("student01")),
+    ("P2", "SEN 로그인 → Microsoft 365 웹으로 바로 이동(학교 B)", "성공(학교 B)", lambda b: b.landing("student02")),
     # --- ④ 라우팅 도메인 심층 ---
     ("R5", "4번: 학교 B 테넌트를 지정한 앱(SharePoint 등)에 통합 아이디", "성공(학교 B)",
      lambda b: b.sign_in(f"student02@{DR}", tenant=tenant_of(D2))),
@@ -427,7 +425,7 @@ VERDICT = {
     "B2b": ok_error("AADSTS500069"), "C1": ok_error(), "C1b": ok_error(), "C7": ok_user(f"mfa01@{D1}", mfa=True), "C8": ok_user(f"mfa02@{D2}", mfa=True),
     "F0": ok_user(f"teacher01@{D1}"), "F1": ok_user(f"teacher01@{D1}"),
     "R1": ok_user(f"student02@{D2}"), "R2": ok_user(f"student01@{D1}"), "R3": ok_user(f"multi01@{D2}"),
-    "R4": ok_user(f"student02@{D2}"), "P1": ok_user(f"student01@{D1}"), "P2": ok_user(f"multi01@{D2}"),
+    "R4": ok_user(f"student02@{D2}"), "P1": ok_user(f"student01@{D1}"), "P2": ok_user(f"student02@{D2}"),
     "R5": ok_user(f"student02@{D2}"), "R6": ok_error(), "R7": ok_user(f"student02@{D2}"),
     "R8": ok_user(f"student02@{D2}"), "R8b": ok_user(f"student02@{D2}"), "R8c": ok_user(f"student02@{D2}"),
     "R9": ok_user(f"student02@{D2}"), "R10": ok_user(f"student02@{D2}"), "R11": ok_error("AADSTS5000820"),
@@ -482,7 +480,7 @@ def main():
               f"전달 파라미터: {sorted({k for e in reqs for k in e.get('paramKeys', [])})}, "
               f"ForceAuthn 요청: {sum(1 for e in reqs if e.get('forceAuthn'))}건")
         results.append({"id": "IDP_LOG", "authnRequests": reqs[:50],
-                        "responses": [e for e in entries if e["event"] in ("saml_response", "idp_initiated")][:50]})
+                        "responses": [e for e in entries if e["event"] == "saml_response"][:50]})
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)

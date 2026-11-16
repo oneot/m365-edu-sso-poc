@@ -102,12 +102,12 @@ a { color: inherit; }
 .sub { margin: 8px 0 0; font-size: 15px; line-height: 1.6; color: var(--muted); text-align: center; text-wrap: balance; }
 
 /* 오목한 유리 홈 (agent-seal 파일 탭의 홈) */
-.group, .tenant {
+.group {
   border-radius: 22px;
   background: var(--groove);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .045), inset 0 1px 3px rgba(15, 23, 42, .05);
+  transition: background .3s var(--ease), box-shadow .3s var(--ease);
 }
-.group { transition: background .3s var(--ease), box-shadow .3s var(--ease); }
 .group:focus-within {
   background: rgba(255, 255, 255, .6);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1), inset 0 1px 3px rgba(15, 23, 42, .05), 0 0 0 4px rgba(15, 23, 42, .035);
@@ -129,7 +129,7 @@ a { color: inherit; }
 .msg:empty { min-height: 0; margin: 0; }
 
 /* 유리 단추 */
-.round, .chip, .btn {
+.round, .chip {
   flex: none; position: relative; display: inline-flex; align-items: center; justify-content: center; border: 0; cursor: pointer;
   background: radial-gradient(120% 120% at 30% 18%, #fff 0%, #f6f7f9 55%, #e9ebef 100%);
   box-shadow: 0 0 0 1px var(--line), 0 3px 8px -4px rgba(15, 23, 42, .2), inset 0 1px 1px #fff, inset 0 -2px 4px rgba(15, 23, 42, .06);
@@ -138,18 +138,14 @@ a { color: inherit; }
 .round { width: 40px; height: 40px; padding: 0; border-radius: 50%; }
 .round svg { width: 18px; height: 18px; transition: opacity .2s; }
 .round:disabled { opacity: .4; cursor: default; }
-.round:not(:disabled):hover, .chip:hover, .btn:hover { transform: scale(1.05); }
-.round:not(:disabled):active, .chip:active, .btn:active { transform: scale(.92); transition-duration: .15s; }
-.round:focus-visible, .chip:focus-visible, .btn:focus-visible, .icon:focus-visible, .choice:focus-visible {
+.round:not(:disabled):hover, .chip:hover { transform: scale(1.05); }
+.round:not(:disabled):active, .chip:active { transform: scale(.92); transition-duration: .15s; }
+.round:focus-visible, .chip:focus-visible, .icon:focus-visible, .choice:focus-visible {
   outline: 2px solid rgba(15, 23, 42, .16); outline-offset: 3px;
 }
-.chip, .btn {
+.chip {
   gap: 6px; height: 36px; padding: 0 16px; border-radius: 999px;
   font-size: 14px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; white-space: nowrap;
-}
-.btn.alt {
-  height: 32px; padding: 0 13px; background: transparent; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1);
-  font-size: 13px; color: var(--muted);
 }
 .icon {
   flex: none; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0;
@@ -186,22 +182,8 @@ a { color: inherit; }
 .choice:hover { background: rgba(255, 255, 255, .7); }
 .choice .text { flex: 1; min-width: 0; }
 .choice .name { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-.choice .upn, .tenant .upn { display: block; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
+.choice .upn { display: block; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
 .choice svg { flex: none; width: 18px; height: 18px; color: var(--hint); }
-
-/* 포털 */
-.card.wide { width: min(720px, 100%); align-items: stretch; padding: 32px 28px 28px; }
-.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.card.wide .title { margin-top: 36px; text-align: left; }
-.card.wide .sub { text-align: left; }
-.tenant { margin-top: 24px; padding: 18px 20px 20px; }
-.tenant + .tenant { margin-top: 12px; }
-.tenant h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-.tenant .upn { margin-top: 2px; }
-.apps { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
-.apps.alt-row { margin-top: 10px; }
-.tag { margin-right: 2px; font-size: 12px; color: var(--muted); }
-.hint { margin: 16px 4px 0; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
 
 /* IdP 기록 */
 .card.log { width: min(1200px, 100%); align-items: stretch; padding: 28px; }
@@ -223,8 +205,7 @@ table.log td pre { margin: 0; font: 11px/1.6 var(--mono); white-space: pre-wrap;
   .card { padding: 36px 16px 16px; border-radius: 28px; }
   .row { padding-left: 18px; }
   .row + .row::before { left: 18px; }
-  .card.wide, .card.log { padding: 24px 16px 18px; }
-  .tenant { padding: 16px; }
+  .card.log { padding: 24px 16px 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

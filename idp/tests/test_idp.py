@@ -66,8 +66,6 @@ def data_dir(tmp_path):
         "mfa01": {"name": "m", "passwordHash": h, "accounts": [_account("mfa01", D1)], "flags": {"mfa": True}},
     }
     (tmp_path / "users.json").write_text(json.dumps(users), encoding="utf-8")
-    links_src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "links.json")
-    (tmp_path / "links.json").write_text(open(links_src, encoding="utf-8").read(), encoding="utf-8")
     return str(tmp_path)
 
 
@@ -255,8 +253,6 @@ def test_idp_never_asserts_mfa(app):
     c = app.test_client()
     root, _, _ = saml_from(full_flow(c, D1, "mfa01"))
     assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
-    root, _, _ = saml_from(get(c, f"/portal/launch?domain={D1}&app=0"))
-    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
     assert get(c, "/mfa").status_code == 404
     root, _, _ = saml_from(full_flow(app.test_client(), D2, "student02"))
     assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
@@ -319,11 +315,14 @@ def test_metadata_per_domain(client):
     assert len(root.findall(f".//{{{sc.NS_DS}}}X509Certificate")) == 2
 
 
-def test_idp_initiated_launch(client):
-    full_flow(client, D1, "student01")
-    root, xml, relay = saml_from(get(client, f"/portal/launch?domain={D1}&app=1"))
-    XMLVerifier().verify(xml, x509_cert=KEYS["current"][1])
-    assert root.get("InResponseTo") is None and relay == "https://teams.microsoft.com/"
+def test_login_without_app_request_lands_on_m365(client):
+    # 앱 요청 없이 SEN에서 로그인하면(루트 1) 학교 계정을 login_hint로 넣어 Microsoft 365 웹으로 보낸다
+    assert urlparse(get(client, "/").location).path == "/login"
+    r = login(client, "student01")
+    assert r.status_code == 302 and urlparse(r.location).path == "/"
+    page = get(client, "/").get_data(as_text=True)
+    assert 'content="0;url=https://m365.cloud.microsoft/?login_hint=student01%40school1.example.edu"' in page
+    assert get(client, "/portal").status_code == 404
 
 
 # --- Entra가 넘기는 username(입력한 아이디) 처리 ---

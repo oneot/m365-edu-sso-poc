@@ -7,6 +7,7 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 인증: IdP는 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 직접 수행하므로
   (도메인 federatedIdpMfaBehavior=rejectMfaByFederatedIdp) MFA 수행 표시(multipleauthn)를 보내지 않는다.
 - 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
+- 앱 요청 없이 로그인하면(루트 1) 학교 계정으로 Microsoft 365 웹에 바로 들어간다.
 """
 import base64
 import collections
@@ -27,7 +28,9 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.design-b"
+VERSION = "2026-11-17.m365-landing"
+# login_hint에 학교 계정을 넣으면 Entra가 학교 도메인의 IdP(여기)로 바로 보내고, SEN 세션으로 비밀번호 없이 통과한다.
+M365_HOME = "https://m365.cloud.microsoft/?login_hint={upn}"
 
 
 def _b64_env(name):
@@ -68,7 +71,6 @@ def create_app(overrides=None):
     data_dir = cfg["DATA_DIR"]
     domains = {k.lower(): v for k, v in json.loads(_read(os.path.join(data_dir, "domains.json"))).items()}
     users = json.loads(_read(os.path.join(data_dir, "users.json")))
-    links = json.loads(_read(os.path.join(data_dir, "links.json")))
     if not cfg["KEYS"].get(cfg["ACTIVE_SIGNING"], ("", ""))[0]:
         raise RuntimeError(f"서명 키가 없습니다: {cfg['ACTIVE_SIGNING']}")
 
@@ -188,7 +190,16 @@ def create_app(overrides=None):
 
     @app.get("/")
     def home():
-        return redirect(url_for("portal") if session.get("uid") else url_for("login"))
+        uid = session.get("uid")
+        if not uid or uid not in users:
+            return to_login()
+        # SEN 아이디 하나에는 학교 계정이 하나다(학교 테넌트 1곳).
+        accounts = users[uid].get("accounts", [])
+        if not accounts:
+            return message("연결된 학교 계정이 없습니다.", 403)
+        log("land_m365", uid=uid, upn=accounts[0]["upn"])
+        # 로그인 폼을 보낸 뒤의 리디렉션에는 로그인 화면의 form-action이 적용되므로, 이 화면에서 새로 이동한다.
+        return render_template("go.html", href=M365_HOME.format(upn=quote(accounts[0]["upn"])))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -222,7 +233,7 @@ def create_app(overrides=None):
         log("login_ok", uid=uid, ip=ip, pending=bool(p), via=request.headers.get("Origin") or "same-origin")
         if k and not p:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
-        return redirect(url_for("saml_continue", k=k) if p else url_for("portal"))
+        return redirect(url_for("saml_continue", k=k) if p else url_for("home"))
 
     @app.get("/logout")
     def logout():
@@ -324,42 +335,6 @@ def create_app(overrides=None):
             typed=p.get("hint") or None,
             typedOverridden=bool(p.get("hint") and not hint_matches(uid, p["domain"], p["hint"])))
         return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": p["relay"]})
-
-    @app.get("/portal")
-    def portal():
-        uid = session.get("uid")
-        if not uid or uid not in users:
-            return to_login()
-        user = users[uid]
-        rows = []
-        for a in user.get("accounts", []):
-            d = domains.get(a["domain"], {})
-            values = {"upn": quote(a["upn"]), "domain": a["domain"], "tenantId": d.get("tenantId", "")}
-            rows.append({"school": d.get("schoolName", a["domain"]), "upn": a["upn"],
-                         "links": [{"label": l["label"], "url": l["url"].format(**values),
-                                    "launch": url_for("launch", domain=a["domain"], app=i)}
-                                   for i, l in enumerate(links)]})
-        return render_template("portal.html", name=user.get("name", uid), uid=uid, rows=rows)
-
-    @app.get("/portal/launch")
-    def launch():
-        """IdP 시작 방식(요청 없이 보내는 SAML 응답). Entra가 받아 주는지 PoC로 확인하는 실험 경로."""
-        uid = session.get("uid")
-        if not uid or uid not in users:
-            return to_login()
-        domain = (request.args.get("domain") or "").lower()
-        account = next((a for a in users[uid].get("accounts", []) if a["domain"] == domain), None)
-        try:
-            target = links[int(request.args.get("app", "0"))]["target"]
-        except (ValueError, IndexError):
-            abort(400)
-        if not account or domains.get(domain, {}).get("mode") != "school":
-            abort(403)
-        key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
-        xml = sc.build_response(issuer=issuer_for(domain), in_response_to=None, name_id=account["immutableId"],
-                                upn=account["upn"], key_pem=key, cert_pem=cert)
-        log("idp_initiated", uid=uid, domain=domain, upn=account["upn"], relayState=target)
-        return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": target})
 
     @app.route("/saml/m365/slo", methods=["GET", "POST"])
     def slo():
