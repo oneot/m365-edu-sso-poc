@@ -1,4 +1,4 @@
-# SEN스쿨–Microsoft 365 SSO PoC 정리 (2026-11-16 기준)
+# SEN – Microsoft 365 SSO PoC
 
 학교별 Microsoft 365 테넌트를 그대로 두고 SEN IdP 한 벌로 SSO하는 방식을 실제 테넌트에서 검증했다. 시연 영상은 https://demo.joowon.me 에 있다.
 
