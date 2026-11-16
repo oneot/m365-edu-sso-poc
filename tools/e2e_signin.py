@@ -197,10 +197,10 @@ class Browser:
         return outcome
 
     def landing(self, idp_user):
-        """앱 요청 없이 SEN에 로그인했을 때(루트 1) IdP가 보내 주는 Microsoft 365 웹 주소를 따라간다."""
+        """앱 요청 없이 SEN에 로그인한 뒤(루트 1) SEN 포털의 'Microsoft 365로 이동하기' 주소를 따라간다."""
         self.s.post(f"{IDP}/login", data={"username": idp_user, "password": self.password}, allow_redirects=False)
         page = self.s.get(f"{IDP}/", allow_redirects=False)
-        m = re.search(r'http-equiv="refresh" content="0;url=([^"]+)"', page.text)
+        m = re.search(r'id="goM365" href="([^"]+)"', page.text)
         if not m:
             return {"result": "no_landing", "status": page.status_code, "steps": [], "idpLogin": True, "entraMfa": False}
         url = html.unescape(m.group(1))
@@ -364,8 +364,8 @@ SCENARIOS = [
     ("R3", "4번: 겸임교사 통합 아이디 → 학교 B 선택", "관찰", lambda b: b.sign_in(f"multi01@{DR}", choose=D2)),
     ("R4", "4번: MS 로그인 화면에 통합 아이디 직접 입력 → 학교 B", "관찰",
      lambda b: b.sign_in(f"student02@{DR}", hint=False)),
-    ("P1", "SEN 로그인 → Microsoft 365 웹으로 바로 이동(학교 A)", "성공(학교 A)", lambda b: b.landing("student01")),
-    ("P2", "SEN 로그인 → Microsoft 365 웹으로 바로 이동(학교 B)", "성공(학교 B)", lambda b: b.landing("student02")),
+    ("P1", "SEN 포털 'Microsoft 365로 이동하기'(학교 A)", "성공(학교 A)", lambda b: b.landing("student01")),
+    ("P2", "SEN 포털 'Microsoft 365로 이동하기'(학교 B)", "성공(학교 B)", lambda b: b.landing("student02")),
     # --- ④ 라우팅 도메인 심층 ---
     ("R5", "4번: 학교 B 테넌트를 지정한 앱(SharePoint 등)에 통합 아이디", "성공(학교 B)",
      lambda b: b.sign_in(f"student02@{DR}", tenant=tenant_of(D2))),

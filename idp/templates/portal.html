@@ -1,0 +1,19 @@
+{% extends "_layout.html" %}
+{% block title %}SEN 포털 (PoC){% endblock %}
+{% block body %}
+<div class="glass card wide">
+  <div class="bar">
+    {% include "_logo.html" %}
+    <a class="chip" href="{{ url_for('logout') }}">로그아웃</a>
+  </div>
+  <h1 class="title">{{ name }}님, 안녕하세요</h1>
+  <p class="sub">아이디 {{ uid }}@{{ id_domain }}로 로그인했습니다.</p>
+  <section class="group tenant">
+    <h2>{{ school }}</h2>
+    <span class="upn">{{ upn }}</span>
+    <a class="btn" id="goM365" href="{{ href }}">Microsoft 365로 이동하기
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5.5l6.5 6.5-6.5 6.5"/></svg>
+    </a>
+  </section>
+</div>
+{% endblock %}

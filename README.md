@@ -23,7 +23,7 @@
 
 - **라우팅 전용 테넌트:** 학생·교사 계정과 라이선스 없이 SEN 아이디 도메인만 등록합니다. 라우팅 설정(페더레이션)은 이 테넌트 관리자만 바꿀 수 있어, 학교 테넌트 관리자는 전체 학생의 SEN 아이디 로그인 경로를 바꿀 수 없습니다.
 - **주소**
-  - https://auth.joowon.me/login : SEN IdP(SEN 로그인 화면 `/login`, SAML). 로그인하면 Microsoft 365 웹으로 바로 이동합니다(루트 1)
+  - https://auth.joowon.me/login : SEN IdP(SEN 로그인 화면 `/login`, SEN 포털, SAML)
   - https://m365.cloud.microsoft : Microsoft 365 로그인 화면
 - **테스트 계정**
   - 학생·교사: `student01`·`student02`·`teacher01`
@@ -54,7 +54,7 @@
 
 | 항목 | 루트 1: SEN 포털 | 루트 2: MS 웹 + SEN 아이디 | 루트 3: MS 웹 + 학교 계정 |
 |---|---|---|---|
-| 시작 | SEN 로그인 → Microsoft 365 웹(`m365.cloud.microsoft`)으로 바로 이동 | `student01@joowon.me` 입력 | 실제 MS 계정 `student01@school1.joowon.me` 입력(또는 계정 선택 화면) |
+| 시작 | SEN 포털 로그인 → 'Microsoft 365로 이동하기' | `student01@joowon.me` 입력 | 실제 MS 계정 `student01@school1.joowon.me` 입력(또는 계정 선택 화면) |
 | 홈 영역 검색 | `school1` → 학교 A(이동 주소의 `login_hint`) | `joowon.me` → 라우팅 전용 테넌트 | `school1` → 학교 A |
 | SEN 로그인 화면 | 처음 로그인 때 한 번 | 아이디 미리 채움 | '학교 A' 표시, 아이디 빈칸(PoC) |
 | Microsoft 확인 화면 | 도메인 확인 + 로그인 상태 유지 | 로그인 상태 유지 | 로그인 상태 유지 |
@@ -65,7 +65,11 @@
 확인한 동작:
 
 - 페더레이션된 도메인이면 Entra는 계정이 있는지 보지 않고 도메인만 보고 SEN 로그인 화면으로 보냅니다.
-- 루트 1은 Microsoft 365 계정 관리자가 계정을 바꿀 때 쓰는 주소(`m365.cloud.microsoft/login?login_hint=학교 계정`)로 보냅니다. 첫 화면 주소(`m365.cloud.microsoft/?login_hint=`)는 Edge 프로필에 다른 회사 계정이 로그인돼 있으면 힌트를 무시하고 그 계정으로 열렸습니다(SEN에 요청이 오지 않음).
+- 루트 1의 'Microsoft 365로 이동하기'는 Microsoft 365 계정 관리자가 계정을 바꿀 때 쓰는 주소(`m365.cloud.microsoft/login?login_hint=학교 계정`)입니다. 첫 화면 주소(`m365.cloud.microsoft/?login_hint=`)는 Edge 프로필에 다른 회사 계정이 로그인돼 있으면 힌트를 무시하고 그 계정으로 열렸습니다(SEN에 요청이 오지 않음).
+- Microsoft 로그아웃은 SEN에 제대로 전달되지 않았습니다. 로그아웃 요청이 SEN 쿠키 없이 오거나(Edge) 아예 오지 않았습니다(Chromium·Edge 새 프로필 자동 시험). 그래서 SEN은 다음처럼 처리합니다.
+  - 로그아웃 요청이 오면 NameID(ImmutableID)로 그 사용자의 SEN 세션을 서버에서 끝냅니다.
+  - 로그인은 10분만 유지합니다.
+  - 로그인이 남은 채 `auth.joowon.me`에 다시 들어오면 'student01로 로그인되어 있습니다'와 [Microsoft 365로 이동하기]·[로그아웃]을 보여 줍니다.
 - Microsoft 세션이 있으면 대개 SEN을 거치지 않습니다. 앱이 다시 요청하면 SEN을 한 번 거치지만, SEN 세션이 있으면 비밀번호 없이 통과합니다.
 - 루트 2로 처음 로그인하면 다음부터 계정 선택 화면에는 학교 계정만 남습니다. 그래서 반복 로그인은 대부분 루트 3입니다.
 - 비밀번호는 세 루트 모두 SEN 화면에서만 입력합니다. MFA 대상 계정은 SEN 로그인 뒤 Entra MFA를 거칩니다.
@@ -79,12 +83,12 @@
 
 ### 5.1 기본 SSO와 거부
 
-- **학교 계정과 SEN 로그인:** 학교 계정 로그인과 SEN 로그인 뒤 Microsoft 365 이동(루트 1) 모두 성공했습니다.
+- **학교 계정과 SEN 포털:** 학교 계정 로그인과 SEN 포털의 'Microsoft 365로 이동하기'(루트 1) 모두 성공했습니다.
 - **거부:** 위조·오류는 모두 거부됐습니다.
   - 등록 안 된 Issuer: AADSTS50107
   - 서명 변조: AADSTS500069
   - ImmutableID 없음: AADSTS90019·90072
-- **재인증 요구:** 앱의 재인증 요구(`prompt=login`)는 IdP에 전달되지 않습니다. 재인증 주기는 IdP 세션 수명으로 통제합니다.
+- **재인증 요구:** 앱의 재인증 요구(`prompt=login`)는 IdP에 전달되지 않습니다. 재인증 주기는 IdP 세션 수명(PoC 10분)으로 통제합니다.
 - **인증서 교체:** 두 테넌트 모두 성공했습니다.
 - **Entra 요청 형식:** 서명 없는 POST 요청이고, 폼에 `username`이 들어 있습니다.
 - **IdP 구현 요건:** SAML 응답 자동 전송 화면에는 CSP `form-action`을 제한하지 않습니다.
@@ -119,7 +123,7 @@
 4. 학교 도메인 요청에도 아이디를 채우고, 아이디의 도메인은 떼고 처리합니다.
 5. 연결된 학교 계정이 없으면 안내 화면을 보여 줍니다.
 6. 실패 제한은 계정 단위로 둡니다.
-7. 세션 수명과 로그아웃 연동(SLO)을 정합니다.
+7. 세션 수명과 로그아웃 연동(SLO)을 정합니다. Microsoft 로그아웃 요청은 SEN 쿠키 없이 오거나 오지 않을 수 있으므로, 요청이 오면 서명을 검증한 뒤 NameID로 세션을 서버에서 끝내고 세션 수명은 짧게 둡니다.
 8. 서명키를 정기 교체합니다.
 9. SAML 응답 화면의 CSP를 위 5.1대로 둡니다.
 
@@ -242,7 +246,7 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준입니다. Office 365 A3는 Entra ID F
 
 | 폴더 | 내용 |
 |---|---|
-| `idp/` | 테스트 IdP(Flask). 로그인 화면, 도메인별 Issuer·로그인 주소, 응답 서명, SEN 아이디 라우팅, 로그인 뒤 Microsoft 365 이동, 기록 |
+| `idp/` | 테스트 IdP(Flask). 로그인 화면, 도메인별 Issuer·로그인 주소, 응답 서명, SEN 아이디 라우팅, SEN 포털, 로그아웃 연동, 기록 |
 | `graph/` | Microsoft Graph 일괄 설정 스크립트(현황 점검, ImmutableID, 페더레이션, 인증서 교체, 원복) |
 | `tools/` | 토큰 도우미, 테넌트 준비, 테스트 데이터·계정 생성, 배포, 로그인 종단 시험, 브라우저 시연, 보안 데모, 시연 영상 녹화 |
 | `tests/` | Graph 스크립트 오프라인 시험(가짜 테넌트) |
@@ -332,7 +336,7 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 | C6 | 등록한 인증 수단이 없는 MFA 대상 계정 | 로그인 중 Microsoft 등록 화면에서 인증 앱을 등록한 뒤 로그인 |
 | C7 / C8 | MFA 필수 계정(학교 A `mfa01`, 학교 B `mfa02`) | SEN 로그인 뒤 Entra가 인증 앱 코드를 요구, 성공 |
 | F0 → F1 | 앱이 재인증(`prompt=login`) 요구 | IdP에 전달되지 않음, IdP 세션으로 바로 통과 |
-| P1 / P2 | SEN 로그인 → Microsoft 365 웹으로 바로 이동(`student01` / `student02`) | 성공(학교 A / 학교 B) |
+| P1 / P2 | SEN 포털 'Microsoft 365로 이동하기' → Microsoft 365 웹(`student01` / `student02`) | 성공(학교 A / 학교 B) |
 | 인증서 교체 | IdP 서명을 다음 인증서로 전환(테넌트에는 다음 인증서만 등록된 상태) | 두 테넌트 모두 성공 |
 | R5 | 학교 B 테넌트를 지정한 앱(SharePoint처럼 테넌트 고정 주소)에 SEN 아이디 입력 | 성공 |
 | R6 | 라우팅 테넌트를 지정한 앱에 학교 B 학생 | 거부(AADSTS50020) |
@@ -350,5 +354,6 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 - R5~R14는 라우팅 도메인이 학교 테넌트에 있을 때(2026-11-12) 시험했습니다. 라우팅 전용 테넌트로 옮긴 뒤(2026-11-15) R6·R9·R10·R11·R12·R13·R14를 다시 확인했습니다.
 - 로그인 화면을 IdP(`auth.joowon.me/login`)로 옮긴 뒤(2026-11-17) A1·A2·A3, B2a·B2b, C1·C1b, C7·C8, F0·F1, P1·P2, R13·R14를 다시 확인했습니다(C8은 브라우저로 확인).
 - IdP 화면 디자인을 바꾼 뒤(2026-11-17) A1·A3·B2a·P1·R13·R14를 다시 확인했고, A3·P1·R13은 브라우저로도 확인했습니다.
-- SEN 포털 화면을 없애고 로그인 뒤 Microsoft 365 웹으로 바로 이동하게 바꾼 뒤(2026-11-17) P1·P2를 다시 확인했습니다(P1은 브라우저로도 확인).
+- SEN 포털을 'Microsoft 365로 이동하기' 단추 하나로 바꾼 뒤(2026-11-17) P1·P2를 다시 확인했습니다(P1은 브라우저로도 확인).
 - 브라우저에 다른 학교 계정(`student01`)이 로그인된 상태에서 `student02`로 SEN에 로그인해도 Microsoft 365가 `student02`로 열리는 것을 확인했습니다(2026-11-17).
+- Microsoft 로그아웃 요청이 SEN 쿠키 없이 와도 그 사용자의 SEN 세션이 끝나는 것(단위 시험)과, 로그인이 남은 채 `auth.joowon.me`에 다시 들어오면 로그인 상태 확인 화면이 나오는 것(브라우저)을 확인했습니다(2026-11-17).

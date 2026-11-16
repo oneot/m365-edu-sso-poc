@@ -502,7 +502,7 @@ class Run:
             elif host == IDP_HOST:
                 seen_login = True
                 if path.rstrip("/") == "":
-                    continue  # 로그인 뒤 Microsoft 365 웹으로 넘어가는 중
+                    continue  # SEN 포털 화면(단추를 누르면 넘어감)
                 if page.locator("button[name=domain]").count():
                     pick = choose or page.locator("button[name=domain]").first.get_attribute("value")
                     page.wait_for_timeout(1500)
@@ -621,9 +621,9 @@ class Run:
                 pass
         return None
 
-    # ---- SEN 로그인(앱 요청 없이 시작하면 IdP가 Microsoft 365 웹으로 바로 보낸다)
+    # ---- SEN 포털(앱 요청 없이 로그인하면 학교 계정과 'Microsoft 365로 이동하기'를 보여 준다)
     def sen_login(self, idp_user):
-        self.step(f"SEN 로그인({idp_user})")
+        self.step(f"SEN 포털 로그인({idp_user})")
         self.page.goto(f"{IDP}/login", wait_until="commit")
         page = self.page
         page.wait_for_selector("#password", timeout=30000)
@@ -634,7 +634,8 @@ class Run:
         page.locator("#password").press_sequentially(self.rec.password, delay=40)
         page.wait_for_timeout(400)
         page.locator("button[type=submit]").first.click()
-        page.wait_for_url(lambda u: urlparse(u).hostname != IDP_HOST, timeout=30000)
+        page.wait_for_selector("#goM365", timeout=30000)
+        page.wait_for_timeout(2500)
 
     def app(self, name, *, typed=None, idp_user=None, account=None, choose=None, goto=True, url=None):
         self.new_trace()
@@ -731,6 +732,10 @@ def app_flow(name, typed_id, *, account=None, choose=None, idp_user=None):
 def sen_land(idp_user, account):
     def run(r):
         r.sen_login(idp_user)
+        r.page.locator("#goM365").hover()
+        r.page.wait_for_timeout(900)
+        r.step("SEN 포털: Microsoft 365로 이동하기")
+        r.page.locator("#goM365").click()
         out = r.app("m365", goto=False, idp_user=idp_user, account=account)
         r.result_lines.append(app_line(out, account))
         r.matched = expect_app(account)(out)
@@ -796,11 +801,11 @@ def scenarios(rec):
         chain(("첫 로그인", lambda r: r.cli(f"teacher01@{D1}"), expect_success(f"teacher01@{D1}", A, password=True)),
               ("prompt=login", lambda r: r.cli(f"teacher01@{D1}", prompt="login"),
                expect_success(f"teacher01@{D1}", A, password=False))))
-    add("P1", "sso", "SEN 로그인 → Microsoft 365 웹(학교 A)", [("계정", "student01 (SEN 로그인)")],
-        "SEN에 로그인하면 비밀번호를 다시 묻지 않고 학교 Microsoft 365로 바로 들어가는지", "Microsoft 365 진입(학교 A)",
+    add("P1", "sso", "SEN 포털 → Microsoft 365로 이동하기(학교 A)", [("계정", "student01 (SEN 포털)")],
+        "SEN 포털에서 단추를 누르면 비밀번호를 다시 묻지 않고 학교 Microsoft 365로 들어가는지", "Microsoft 365 진입(학교 A)",
         sen_land("student01", f"student01@{D1}"))
-    add("P2", "sso", "SEN 로그인 → Microsoft 365 웹(학교 B)", [("계정", "student02 (SEN 로그인)")],
-        "다른 학교 테넌트 학생도 SEN 로그인만으로 바로 들어가는지", "Microsoft 365 진입(학교 B)",
+    add("P2", "sso", "SEN 포털 → Microsoft 365로 이동하기(학교 B)", [("계정", "student02 (SEN 포털)")],
+        "다른 학교 테넌트 학생도 SEN 포털에서 바로 들어가는지", "Microsoft 365 진입(학교 B)",
         sen_land("student02", f"student02@{D2}"))
     # 거부
     add("B2a", "reject", "등록되지 않은 Issuer로 보낸 응답", [("계정", f"badissuer01@{D1}")],

@@ -129,7 +129,7 @@ a { color: inherit; }
 .msg:empty { min-height: 0; margin: 0; }
 
 /* 유리 단추 */
-.round, .chip {
+.round, .chip, .btn {
   flex: none; position: relative; display: inline-flex; align-items: center; justify-content: center; border: 0; cursor: pointer;
   background: radial-gradient(120% 120% at 30% 18%, #fff 0%, #f6f7f9 55%, #e9ebef 100%);
   box-shadow: 0 0 0 1px var(--line), 0 3px 8px -4px rgba(15, 23, 42, .2), inset 0 1px 1px #fff, inset 0 -2px 4px rgba(15, 23, 42, .06);
@@ -138,15 +138,20 @@ a { color: inherit; }
 .round { width: 40px; height: 40px; padding: 0; border-radius: 50%; }
 .round svg { width: 18px; height: 18px; transition: opacity .2s; }
 .round:disabled { opacity: .4; cursor: default; }
-.round:not(:disabled):hover, .chip:hover { transform: scale(1.05); }
-.round:not(:disabled):active, .chip:active { transform: scale(.92); transition-duration: .15s; }
-.round:focus-visible, .chip:focus-visible, .icon:focus-visible, .choice:focus-visible {
+.round:not(:disabled):hover, .chip:hover, .btn:hover { transform: scale(1.05); }
+.round:not(:disabled):active, .chip:active, .btn:active { transform: scale(.92); transition-duration: .15s; }
+.round:focus-visible, .chip:focus-visible, .btn:focus-visible, .icon:focus-visible, .choice:focus-visible {
   outline: 2px solid rgba(15, 23, 42, .16); outline-offset: 3px;
 }
 .chip {
   gap: 6px; height: 36px; padding: 0 16px; border-radius: 999px;
   font-size: 14px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; white-space: nowrap;
 }
+.btn {
+  gap: 8px; height: 44px; padding: 0 20px; border-radius: 999px;
+  font-size: 15px; font-weight: 600; letter-spacing: -.01em; text-decoration: none; white-space: nowrap;
+}
+.btn svg { width: 16px; height: 16px; }
 .icon {
   flex: none; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0;
   border: 0; border-radius: 50%; background: none; color: #86868b; cursor: pointer; transition: color .2s var(--ease);
@@ -164,7 +169,7 @@ a { color: inherit; }
 .busy .round::after { position: absolute; inset: 0; margin: auto; }
 @keyframes spin { to { transform: rotate(1turn); } }
 
-/* 로그인 뒤 이동 화면 */
+/* Microsoft로 넘어가는 화면(SAML 응답 자동 전송) */
 .post { display: flex; flex-direction: column; align-items: center; width: 100%; margin-top: 36px; padding-bottom: 8px; }
 .post .spinner { width: 22px; height: 22px; }
 .post-text { margin: 16px 0 0; font-size: 16px; letter-spacing: -.01em; text-align: center; }
@@ -182,8 +187,19 @@ a { color: inherit; }
 .choice:hover { background: rgba(255, 255, 255, .7); }
 .choice .text { flex: 1; min-width: 0; }
 .choice .name { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-.choice .upn { display: block; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
+.choice .upn, .tenant .upn { display: block; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
 .choice svg { flex: none; width: 18px; height: 18px; color: var(--hint); }
+
+/* SEN 포털(로그인 뒤)·로그인 상태 확인 */
+.card.wide { width: min(560px, 100%); align-items: stretch; padding: 32px 28px 28px; }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card.wide .title { margin-top: 32px; text-align: left; }
+.card.wide .sub { text-align: left; }
+.tenant { margin-top: 24px; padding: 18px 20px 20px; }
+.tenant h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.tenant .upn { margin-top: 2px; }
+.tenant .btn { margin-top: 16px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 24px; }
 
 /* IdP 기록 */
 .card.log { width: min(1200px, 100%); align-items: stretch; padding: 28px; }
@@ -205,7 +221,8 @@ table.log td pre { margin: 0; font: 11px/1.6 var(--mono); white-space: pre-wrap;
   .card { padding: 36px 16px 16px; border-radius: 28px; }
   .row { padding-left: 18px; }
   .row + .row::before { left: 18px; }
-  .card.log { padding: 24px 16px 18px; }
+  .card.wide, .card.log { padding: 24px 16px 18px; }
+  .tenant { padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

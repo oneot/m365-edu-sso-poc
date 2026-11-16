@@ -7,7 +7,8 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 인증: IdP는 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 직접 수행하므로
   (도메인 federatedIdpMfaBehavior=rejectMfaByFederatedIdp) MFA 수행 표시(multipleauthn)를 보내지 않는다.
 - 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
-- 앱 요청 없이 로그인하면(루트 1) 학교 계정으로 Microsoft 365 웹에 바로 들어간다.
+- 앱 요청 없이 로그인하면(루트 1) SEN 포털 화면에 학교 계정과 'Microsoft 365로 이동하기'를 보여 준다.
+- 로그인 유지 시간은 짧게(기본 10분) 둔다. Microsoft 로그아웃 알림이 SEN에 오지 않아도 오래된 로그인을 다시 쓰지 못하게 한다.
 """
 import base64
 import collections
@@ -28,7 +29,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.slo-end-session"
+VERSION = "2026-11-17.sen-portal"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -60,6 +61,7 @@ def _env_config():
         "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
         "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
         "ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
+        "SESSION_MINUTES": float(os.environ.get("IDP_SESSION_MINUTES", "10")),
         "ACTIVE_SIGNING": os.environ.get("ACTIVE_SIGNING", "current"),
         "KEYS": {
             "current": (pem("SIGNING_KEY_B64", "current.key"), pem("SIGNING_CERT_B64", "current.pem")),
@@ -85,7 +87,7 @@ def create_app(overrides=None):
         SESSION_COOKIE_HTTPONLY=True,
         # Entra가 POST로 로그인 요청을 보내도 기존 로그인 세션이 전달되도록 None
         SESSION_COOKIE_SAMESITE="None",
-        PERMANENT_SESSION_LIFETIME=dt.timedelta(hours=8),
+        PERMANENT_SESSION_LIFETIME=dt.timedelta(minutes=cfg["SESSION_MINUTES"]),
     )
 
     log_buffer = collections.deque(maxlen=1000)
@@ -178,8 +180,14 @@ def create_app(overrides=None):
     @app.before_request
     def drop_ended_session():
         uid = session.get("uid")
-        if uid and session.get("iat", 0) <= max(ended.get(uid, 0), started):
+        if not uid:
+            return
+        iat = session.get("iat", 0)
+        if iat <= max(ended.get(uid, 0), started):
             log("session_ended", uid=uid)
+            session.clear()
+        elif time.time() - iat > cfg["SESSION_MINUTES"] * 60:
+            log("session_expired", uid=uid)
             session.clear()
 
     @app.after_request
@@ -207,12 +215,17 @@ def create_app(overrides=None):
         if not uid or uid not in users:
             return to_login()
         # SEN 아이디 하나에는 학교 계정이 하나다(학교 테넌트 1곳).
-        accounts = users[uid].get("accounts", [])
-        if not accounts:
+        account = next(iter(users[uid].get("accounts", [])), None)
+        if not account:
             return message("연결된 학교 계정이 없습니다.", 403)
-        log("land_m365", uid=uid, upn=accounts[0]["upn"])
-        # 로그인 폼을 보낸 뒤의 리디렉션에는 로그인 화면의 form-action이 적용되므로, 이 화면에서 새로 이동한다.
-        return render_template("go.html", href=M365_HOME.format(upn=quote(accounts[0]["upn"])))
+        fresh = session.pop("fresh", False)
+        log("sen_home", uid=uid, fresh=fresh)
+        href = M365_HOME.format(upn=quote(account["upn"]))
+        if fresh:
+            return render_template("portal.html", name=users[uid].get("name", uid), uid=uid, upn=account["upn"], href=href,
+                                   school=domains.get(account["domain"], {}).get("schoolName", account["domain"]))
+        # 로그인이 남은 채 다시 들어오면(예: Microsoft에서만 로그아웃한 뒤) 누구로 로그인돼 있는지부터 보여 준다.
+        return render_template("signed_in.html", uid=uid, href=href)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -244,6 +257,8 @@ def create_app(overrides=None):
         if p:
             with lock:
                 p["logged_in"] = True
+        else:
+            session["fresh"] = True
         log("login_ok", uid=uid, ip=ip, pending=bool(p), via=request.headers.get("Origin") or "same-origin")
         if k and not p:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
