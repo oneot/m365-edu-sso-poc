@@ -312,12 +312,11 @@ def test_microsoft_logout_ends_sen_session_without_cookie(app):
     full_flow(c, D1, "student01")
     no_cookie = app.test_client()
     get(no_cookie, "/saml/m365/slo", query_string={"SAMLRequest": redirect_param(logout_request("immstudent02"))})
-    assert get(c, "/").status_code == 200  # 다른 사용자의 로그아웃은 영향 없음
+    assert urlparse(start_sso(c, D1, "_req2").location).path == "/saml/continue"  # 다른 사용자의 로그아웃은 영향 없음
     get(no_cookie, "/saml/m365/slo", query_string={"SAMLRequest": redirect_param(logout_request("immstudent01"))})
-    assert urlparse(get(c, "/").location).path == "/login"
-    assert urlparse(start_sso(c, D1, "_req2").location).path == "/login"
+    assert urlparse(start_sso(c, D1, "_req3").location).path == "/login"
     login(c, "student01")
-    assert get(c, "/").status_code == 200
+    assert urlparse(start_sso(c, D1, "_req4").location).path == "/saml/continue"
 
 
 def test_admin_log_requires_token(client):
@@ -336,7 +335,7 @@ def test_metadata_per_domain(client):
     assert len(root.findall(f".//{{{sc.NS_DS}}}X509Certificate")) == 2
 
 
-def test_login_shows_sen_portal_then_signed_in_check(client):
+def test_login_shows_sen_portal_once_then_asks_again(client):
     # 앱 요청 없이 로그인하면(루트 1) SEN 포털에 학교 계정과 Microsoft 365 이동 단추를 보여 준다
     assert urlparse(get(client, "/").location).path == "/login"
     r = login(client, "student01")
@@ -344,9 +343,8 @@ def test_login_shows_sen_portal_then_signed_in_check(client):
     go = 'href="https://m365.cloud.microsoft/login?es=Click&amp;login_hint=student01%40school1.example.edu"'
     page = get(client, "/").get_data(as_text=True)
     assert "학생01님, 안녕하세요" in page and "학교 A" in page and "student01@school1.example.edu" in page and go in page
-    # 로그인이 남은 채 다시 들어오면 누구로 로그인돼 있는지 먼저 보여 준다
-    again = get(client, "/").get_data(as_text=True)
-    assert "student01로 로그인되어 있습니다." in again and go in again and 'href="/logout"' in again
+    # 다시 들어오면 로그인이 남아 있어도 아이디·비밀번호부터 묻는다
+    assert urlparse(get(client, "/").location).path == "/login"
 
 
 def test_sen_session_ends_after_lifetime(data_dir):

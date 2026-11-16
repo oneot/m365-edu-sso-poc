@@ -7,7 +7,8 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 인증: IdP는 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 직접 수행하므로
   (도메인 federatedIdpMfaBehavior=rejectMfaByFederatedIdp) MFA 수행 표시(multipleauthn)를 보내지 않는다.
 - 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
-- 앱 요청 없이 로그인하면(루트 1) SEN 포털 화면에 학교 계정과 'Microsoft 365로 이동하기'를 보여 준다.
+- auth.joowon.me에 들어오면 늘 아이디·비밀번호를 묻고, 로그인한 바로 뒤(루트 1) SEN 포털 화면에 학교 계정과
+  'Microsoft 365로 이동하기'를 보여 준다.
 - 로그인 유지 시간은 짧게(기본 10분) 둔다. Microsoft 로그아웃 알림이 SEN에 오지 않아도 오래된 로그인을 다시 쓰지 못하게 한다.
 """
 import base64
@@ -29,7 +30,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.sen-portal"
+VERSION = "2026-11-17.login-first"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -211,21 +212,19 @@ def create_app(overrides=None):
 
     @app.get("/")
     def home():
+        # auth.joowon.me에 들어오면 로그인이 남아 있어도 아이디·비밀번호부터 묻는다(Microsoft에서만 로그아웃한 경우,
+        # 공용 PC). SEN 포털은 비밀번호를 입력한 바로 뒤 한 번만 보여 준다.
         uid = session.get("uid")
-        if not uid or uid not in users:
+        if not uid or uid not in users or not session.pop("fresh", False):
             return to_login()
         # SEN 아이디 하나에는 학교 계정이 하나다(학교 테넌트 1곳).
         account = next(iter(users[uid].get("accounts", [])), None)
         if not account:
             return message("연결된 학교 계정이 없습니다.", 403)
-        fresh = session.pop("fresh", False)
-        log("sen_home", uid=uid, fresh=fresh)
-        href = M365_HOME.format(upn=quote(account["upn"]))
-        if fresh:
-            return render_template("portal.html", name=users[uid].get("name", uid), uid=uid, upn=account["upn"], href=href,
-                                   school=domains.get(account["domain"], {}).get("schoolName", account["domain"]))
-        # 로그인이 남은 채 다시 들어오면(예: Microsoft에서만 로그아웃한 뒤) 누구로 로그인돼 있는지부터 보여 준다.
-        return render_template("signed_in.html", uid=uid, href=href)
+        log("sen_portal", uid=uid)
+        return render_template("portal.html", name=users[uid].get("name", uid), uid=uid, upn=account["upn"],
+                               href=M365_HOME.format(upn=quote(account["upn"])),
+                               school=domains.get(account["domain"], {}).get("schoolName", account["domain"]))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
