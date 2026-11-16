@@ -2,7 +2,7 @@
 
 헤드리스 Chrome(Playwright, 임시 프로필)이 사람이 하는 순서를 그대로 따른다.
   1) 앱 접속 → Microsoft 로그인 화면에 통합 아이디 입력
-  2) IdP 로그인 화면(GitHub Pages)에 비밀번호 입력(아이디는 IdP가 미리 채움)
+  2) SEN 로그인 화면(IdP의 /login)에 비밀번호 입력(아이디는 IdP가 미리 채움)
   3) 학교 선택(여러 학교 소속)
   4) Microsoft 확인 화면(도메인 확인, 로그인 상태 유지)
   5) 앱 화면
@@ -20,7 +20,7 @@ from playwright.sync_api import sync_playwright
 
 
 ROUTE = "id.joowon.me"
-IDP_HOST, LOGIN_HOST = "auth.joowon.me", "login.joowon.me"
+IDP_HOST = "auth.joowon.me"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/157.0.0.0 Safari/537.36")
 def make_flows(route):
@@ -103,7 +103,8 @@ def run_flow(pw, name, args, password):
                                       "input[type=submit]", "button[type=submit]"]):
                     done.add("confirm")
                     continue
-        elif host == LOGIN_HOST and "idp-login" not in done and page.locator("#password").count():
+        elif host == IDP_HOST and path.rstrip("/") == "/login" and "idp-login" not in done \
+                and page.locator("#password").count():
             prefilled = page.locator("#username").input_value()
             result["prefilled"] = prefilled
             shot("sen-login")

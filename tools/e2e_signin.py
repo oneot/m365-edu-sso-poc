@@ -27,7 +27,6 @@ CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"  # Azure CLI(Microsoft 공개
 REDIRECT = "http://localhost:8400"
 IDP_HOST = "auth.joowon.me"
 IDP = f"https://{IDP_HOST}"
-LOGIN_UI_HOSTS = {IDP_HOST, "login.joowon.me", "oneot.github.io"}
 # Chrome UA면 장치 SSO 확인 페이지(AADSTS50168)가 끼어들어 Firefox UA를 쓴다.
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0"
 D1, D2, DR = "school1.joowon.me", "school2.joowon.me", "id.joowon.me"
@@ -229,27 +228,18 @@ class Browser:
                     return {"result": "error", "error": q.get("error", [""])[0],
                             "errorDescription": q.get("error_description", [""])[0][:400]}
                 lp = urlparse(loc)
-                if lp.netloc in LOGIN_UI_HOSTS and (lp.path.rstrip("/").endswith("/login") or lp.netloc != IDP_HOST):
-                    q = parse_qs(lp.query)
-                    k = q.get("k", [None])[0]
-                    api, origin = IDP, None
-                    if lp.netloc != IDP_HOST:
-                        # GitHub Pages 로그인 화면: 화면을 받아 오고, 화면의 스크립트처럼 api/login 으로 전송
-                        page = self.s.get(loc)
-                        if page.status_code != 200 or 'id="loginForm"' not in page.text:
-                            return {"result": "login_ui_error", "status": page.status_code}
-                        api = q.get("api", [IDP])[0]
-                        if api != IDP:
-                            return {"result": "login_ui_unexpected_api", "api": api}
-                        origin = f"{lp.scheme}://{lp.netloc}"
-                        trace["steps"].append(f"Pages 로그인 화면({lp.netloc}, 학교 표시={q.get('school', ['-'])[0]})")
+                if lp.netloc == IDP_HOST and lp.path.rstrip("/") == "/login":
+                    # SEN 로그인 화면(IdP가 직접 보냄): 화면을 받아 온 뒤 화면의 폼처럼 /login 으로 전송
+                    k = parse_qs(lp.query).get("k", [None])[0]
+                    page = self.s.get(loc)
+                    if page.status_code != 200 or 'id="loginForm"' not in page.text:
+                        return {"result": "login_ui_error", "status": page.status_code}
                     trace["idpLogin"] = True
                     trace["steps"].append(f"IdP 로그인({idp_user})")
                     data = {"username": idp_user, "password": self.password}
                     if k:
                         data["k"] = k
-                    r = self.s.post(f"{api}/login", data=data, allow_redirects=False,
-                                    headers={"Origin": origin, "Referer": loc} if origin else None)
+                    r = self.s.post(f"{IDP}/login", data=data, allow_redirects=False)
                     continue
                 if stop_on_leave and lp.netloc not in ("login.microsoftonline.com", IDP_HOST):
                     return {"result": "landed", "url": f"{lp.scheme}://{lp.netloc}{lp.path}"}

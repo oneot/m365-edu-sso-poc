@@ -72,7 +72,7 @@ def data_dir(tmp_path):
 
 
 def make_app(data_dir, **overrides):
-    cfg = {"DATA_DIR": data_dir, "KEYS": KEYS, "IDP_BASE_URL": BASE, "LOGIN_UI_URL": "", "SECRET_KEY": "s", "ID_DOMAIN": "example.edu",
+    cfg = {"DATA_DIR": data_dir, "KEYS": KEYS, "IDP_BASE_URL": BASE, "SECRET_KEY": "s", "ID_DOMAIN": "example.edu",
            "ADMIN_TOKEN": "admintoken", "ACTIVE_SIGNING": "current"}
     cfg.update(overrides)
     return create_app(cfg)
@@ -281,14 +281,15 @@ def test_login_failure_returns_error(client):
     assert r.status_code == 302 and "err=1" in r.location
 
 
-def test_external_login_ui_redirect(data_dir):
-    c = make_app(data_dir, LOGIN_UI_URL="https://login.test/").test_client()
-    r = start_sso(c, D1)
-    q = parse_qs(urlparse(r.location).query)
-    assert r.location.startswith("https://login.test/?")
-    assert q["k"][0] and q["api"][0] == BASE and q["school"][0] == "학교 A"
-    r = post(c, "/login", data={"username": "student01", "password": "wrong", "k": q["k"][0]})
-    assert r.location.startswith("https://login.test/?") and "err=1" in r.location
+def test_login_page_served_by_idp_with_frame_protection(client):
+    # 비밀번호 입력 화면은 IdP가 직접 보내므로 다른 사이트가 iframe으로 감쌀 수 없게 막는 헤더가 붙는다
+    r = start_sso(client, D1)
+    loc = urlparse(r.location)
+    assert r.status_code == 302 and loc.path == "/login" and loc.netloc in ("", "auth.test")
+    page = get(client, f"{loc.path}?{loc.query}")
+    assert page.status_code == 200 and 'id="loginForm"' in page.text and 'action="/login"' in page.text
+    assert "frame-ancestors 'none'" in page.headers["Content-Security-Policy"]
+    assert page.headers["X-Frame-Options"] == "DENY"
 
 
 def test_admin_log_requires_token(client):

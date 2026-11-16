@@ -41,7 +41,6 @@ from playwright.sync_api import sync_playwright
 
 from e2e_signin import AAD, CLIENT_ID, D1, D2, DR, DROOT, IDP, IDP_HOST, REDIRECT, b64url, jwt_claims, load_totp, totp_now
 
-LOGIN_HOST = "login.joowon.me"
 MS_HOSTS = ("login.microsoftonline.com", "login.microsoft.com", "login.windows.net")
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/157.0.0.0 Safari/537.36")
@@ -478,7 +477,7 @@ class Run:
                     if DEBUG:
                         print(f"  · 등록 실패 단계: {state_}", flush=True)
                     return {"result": "register_failed", "stage": state_}
-            elif host == LOGIN_HOST:
+            elif host == IDP_HOST and path.rstrip("/") == "/login":  # SEN 로그인 화면
                 seen_login = True
                 pw_box = page.locator("#password")
                 try:

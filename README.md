@@ -19,12 +19,11 @@
 | 학교 A 테넌트 | 학생·교사 계정, 토큰 발급 | `school1.joowon.me` | PoC 계정 |
 | 학교 B 테넌트 | 학생·교사 계정, 토큰 발급, 보안 데모 | `school2.joowon.me` | PoC 계정(보안 데모 포함) |
 | 라우팅 전용 테넌트 | SEN 아이디 도메인 등록 | `joowon.me` | 학생·교사 계정 없음 |
-| Azure App Service(Korea Central) | SEN IdP 실행 | — | — |
+| Azure App Service(Korea Central) | SEN IdP 실행(로그인 화면 포함) | — | — |
 
 - **라우팅 전용 테넌트:** 학생·교사 계정과 라이선스 없이 SEN 아이디 도메인만 등록한다. 라우팅 설정(페더레이션)은 이 테넌트 관리자만 바꿀 수 있어, 학교 테넌트 관리자는 전체 학생의 SEN 아이디 로그인 경로를 바꿀 수 없다.
 - **주소**
-  - `auth.joowon.me`: SEN IdP(SAML, SEN 포털)
-  - `login.joowon.me`: SEN 로그인 화면(GitHub Pages)
+  - `auth.joowon.me`: SEN IdP(SEN 로그인 화면 `/login`, SAML, SEN 포털)
   - `demo.joowon.me`: 시연 영상(기본 SSO, 거부, SEN 아이디 라우팅, 보안 데모, 관리 포털)
 - **테스트 계정**
   - 학생·교사: `student01`·`student02`·`teacher01`
@@ -145,7 +144,7 @@
 | 라우팅 전용 테넌트 | 교육청 소유 `senedu.kr` 테넌트. NIA의 'senedu.kr 매핑 테넌트'에 해당하며, 루트 2에서 필요 |
 | 학교 A·B | 학교별 Education 테넌트 약 1,400개 |
 | `school1`·`school2.joowon.me` | 각 학교의 검증된 커스텀 도메인 |
-| `auth`·`login.joowon.me` | 수행사 SEN IdP |
+| `auth.joowon.me` | 수행사 SEN IdP(로그인 화면 포함) |
 | `graph/` 스크립트 | 약 1,400개 도메인 일괄 설정 |
 
 Microsoft 365는 모든 학교 테넌트에 공통인 SP 하나라서, SEN IdP에 학교마다 SP를 등록하지 않는다. 학교마다 다른 것은 도메인별 Issuer와 각 테넌트의 도메인 페더레이션 설정뿐이다.
@@ -309,12 +308,10 @@ A3는 Microsoft 365 A3(Entra ID P1) 기준이다. Office 365 A3는 Entra ID Free
 
 | 폴더 | 내용 |
 |---|---|
-| `idp/` | 테스트 IdP(Flask). 도메인별 Issuer·로그인 주소, 응답 서명, SEN 아이디 라우팅, 포털, 기록 |
-| `pages/` | 로그인 화면(GitHub Pages). 로그인 처리·서명은 `idp/`가 맡음 |
+| `idp/` | 테스트 IdP(Flask). 로그인 화면, 도메인별 Issuer·로그인 주소, 응답 서명, SEN 아이디 라우팅, 포털, 기록 |
 | `graph/` | Microsoft Graph 일괄 설정 스크립트(현황 점검, ImmutableID, 페더레이션, 인증서 교체, 원복) |
 | `tools/` | 토큰 도우미, 테넌트 준비, 테스트 데이터·계정 생성, 배포, 로그인 종단 시험, 브라우저 시연, 보안 데모, 시연 영상 녹화 |
 | `tests/` | Graph 스크립트 오프라인 시험(가짜 테넌트) |
-| `.github/workflows/` | 로그인 화면(`pages/`)을 GitHub Pages에 배포 |
 | `images/` | README 그림 |
 
 ### 8.7 실행
@@ -341,7 +338,7 @@ python tools/make_test_data.py --domains idp/data/domains.json --out-dir out --p
 python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=<skuPartNumber>
 
 # 배포(Azure App Service). 서명 키·비밀값 경로는 환경 변수로 넘긴다.
-SUB=... RG=... APP=... KEYS_DIR=... SECRETS_FILE=... LOGIN_UI_URL=https://login.example.edu/ tools/deploy_idp.sh
+SUB=... RG=... APP=... KEYS_DIR=... SECRETS_FILE=... tools/deploy_idp.sh
 
 # Entra MFA 등록(MFA 필수 계정). 타사 인증 앱을 쓰려면 인증 방법 정책의 Software OATH tokens를 켠다.
 #   계정에 MFA 요구(사용자별 MFA 등)가 있어야 로그인 중 등록 화면이 뜬다. hack02처럼 요구가 없는 계정은
@@ -397,7 +394,7 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 1. `graph/Invoke-SenM365Federation.ps1 -Mode Rollback`으로 페더레이션 해제
 2. 테스트 계정과 PoC 하위 도메인(`school1`·`school2` 등) 삭제, 라우팅 전용 테넌트의 루트 `joowon.me` 페더레이션·도메인 삭제, 사용자별 MFA 해제(계정을 지우면 등록한 Entra 인증 앱도 함께 지워짐). 학교 A: 인증 방법 'Software OATH tokens'를 원래대로 끄기(PoC에서 켬), Entra 인증 앱 비밀값 파일 삭제
 3. 학교 B 테넌트: Microsoft가 파트너·벤더 테넌트에 자동으로 만든 MFA 정책('Multifactor authentication for Microsoft partners and vendors') 2개에 넣은 전체 사용자 그룹(`ALL`) 제외를 되돌리고 그룹 삭제
-4. Azure 리소스 그룹 삭제, GitHub Pages 사용자 지정 도메인 해제
-5. joowon.me DNS 레코드(`auth`, `asuid.auth`, `login`, PoC 하위 도메인, 루트 TXT `MS=ms…` 전부) 삭제
+4. Azure 리소스 그룹 삭제
+5. joowon.me DNS 레코드(`auth`, `asuid.auth`, PoC 하위 도메인, 루트 TXT `MS=ms…` 전부) 삭제
 6. 보안 데모: `security_demo.py reset`(위험 해제), `security_demo.py cleanup --delete-users`(데모 정책·그룹·계정 삭제). Defender XDR의 Entra ID Protection 알림 설정은 필요하면 기본값('High risk detections')으로 되돌린다.
 7. 시연 영상: `oneot/m365-edu-sso-poc-demo` 저장소(Pages `demo.joowon.me`) 삭제, joowon.me DNS `demo` CNAME 삭제, 포털 녹화용 Chromium 프로필 삭제

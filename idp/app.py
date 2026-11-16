@@ -6,6 +6,7 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 서명 인증서: 모든 도메인 공통 1개(교체용 next 인증서 지원)
 - 인증: IdP는 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 직접 수행하므로
   (도메인 federatedIdpMfaBehavior=rejectMfaByFederatedIdp) MFA 수행 표시(multipleauthn)를 보내지 않는다.
+- 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
 """
 import base64
 import collections
@@ -15,7 +16,7 @@ import os
 import secrets
 import threading
 import time
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -26,7 +27,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-14.entra-mfa"
+VERSION = "2026-11-17.idp-login"
 
 
 def _b64_env(name):
@@ -51,7 +52,6 @@ def _env_config():
         "IDP_BASE_URL": os.environ.get("IDP_BASE_URL", "https://auth.joowon.me").rstrip("/"),
         # IdP 아이디의 도메인 표시(예: 학번@joowon.me). Entra 도메인과는 무관한 IdP 내부 아이디다.
         "ID_DOMAIN": os.environ.get("IDP_ID_DOMAIN", "joowon.me"),
-        "LOGIN_UI_URL": os.environ.get("LOGIN_UI_URL", "").strip(),
         "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
         "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
         "ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
@@ -96,9 +96,6 @@ def create_app(overrides=None):
     def issuer_for(domain):
         return f"{cfg['IDP_BASE_URL']}/saml/m365/{domain}"
 
-    def public_base():
-        return request.host_url.rstrip("/")
-
     def put_pending(item):
         k = secrets.token_urlsafe(18)
         now = time.time()
@@ -120,9 +117,6 @@ def create_app(overrides=None):
 
     def to_login(k=None, err=None, school=None, user=None):
         params = {key: v for key, v in {"k": k, "err": err, "school": school, "user": user}.items() if v}
-        if cfg["LOGIN_UI_URL"]:
-            params["api"] = public_base()
-            return redirect(f"{cfg['LOGIN_UI_URL']}?{urlencode(params)}")
         return redirect(url_for("login", **params))
 
     def post_to_entra(fields):
@@ -194,9 +188,6 @@ def create_app(overrides=None):
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "GET":
-            if cfg["LOGIN_UI_URL"]:
-                return to_login(k=request.args.get("k"), err=request.args.get("err"),
-                                school=request.args.get("school"), user=request.args.get("user"))
             return render_template("login.html", k=request.args.get("k", ""), err=request.args.get("err", ""),
                                    school=request.args.get("school", ""), user=request.args.get("user", ""))
 

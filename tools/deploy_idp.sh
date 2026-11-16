@@ -6,8 +6,7 @@
 #   SUB, RG, APP           Azure 구독·리소스 그룹·웹앱 이름
 #   KEYS_DIR               current.key/current.pem, next.key/next.pem 이 있는 폴더
 #   SECRETS_FILE           SECRET_KEY, ADMIN_TOKEN 을 보관할 파일(없으면 새로 만든다)
-#   LOGIN_UI_URL           (선택) GitHub Pages 로그인 화면 주소. 비우면 서버 내장 로그인 화면 사용
-#   IDP_BASE_URL           (선택) 기본값 https://auth.joowon.me
+#   IDP_BASE_URL           (선택) 기본값 https://auth.joowon.me (로그인 화면도 이 주소의 /login)
 #   IDP_ID_DOMAIN          (선택) IdP 아이디 도메인 표시, 기본값 joowon.me
 #   SKIP_SETTINGS=1        (선택) 앱 설정은 그대로 두고 코드·데이터만 배포(빌드 중 재시작 방지)
 set -euo pipefail
@@ -30,7 +29,6 @@ if [ -z "${SKIP_SETTINGS:-}" ]; then
 az webapp config appsettings set -g "$RG" -n "$APP" --subscription "$SUB" --output none --settings \
   SCM_DO_BUILD_DURING_DEPLOYMENT=true \
   IDP_BASE_URL="${IDP_BASE_URL:-https://auth.joowon.me}" IDP_ID_DOMAIN="${IDP_ID_DOMAIN:-joowon.me}" \
-  LOGIN_UI_URL="${LOGIN_UI_URL:-}" \
   ACTIVE_SIGNING="${ACTIVE_SIGNING:-current}" \
   SECRET_KEY="$SECRET_KEY" ADMIN_TOKEN="$ADMIN_TOKEN" \
   SIGNING_KEY_B64="$(b64 "$KEYS_DIR/current.key")" SIGNING_CERT_B64="$(b64 "$KEYS_DIR/current.pem")" \
