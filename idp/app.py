@@ -28,9 +28,11 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.m365-landing"
-# login_hint에 학교 계정을 넣으면 Entra가 학교 도메인의 IdP(여기)로 바로 보내고, SEN 세션으로 비밀번호 없이 통과한다.
-M365_HOME = "https://m365.cloud.microsoft/?login_hint={upn}"
+VERSION = "2026-11-17.m365-switch"
+# Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
+# 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
+# 힌트를 무시하고 기존 계정으로 열릴 수 있다.
+M365_HOME = "https://m365.cloud.microsoft/login?es=Click&login_hint={upn}"
 
 
 def _b64_env(name):

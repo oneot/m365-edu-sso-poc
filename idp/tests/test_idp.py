@@ -321,7 +321,7 @@ def test_login_without_app_request_lands_on_m365(client):
     r = login(client, "student01")
     assert r.status_code == 302 and urlparse(r.location).path == "/"
     page = get(client, "/").get_data(as_text=True)
-    assert 'content="0;url=https://m365.cloud.microsoft/?login_hint=student01%40school1.example.edu"' in page
+    assert 'content="0;url=https://m365.cloud.microsoft/login?es=Click&amp;login_hint=student01%40school1.example.edu"' in page
     assert get(client, "/portal").status_code == 404
 
 
