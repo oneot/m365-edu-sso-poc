@@ -28,7 +28,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.m365-switch"
+VERSION = "2026-11-17.slo-end-session"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -90,6 +90,10 @@ def create_app(overrides=None):
 
     log_buffer = collections.deque(maxlen=1000)
     pending, failures = {}, collections.defaultdict(collections.deque)
+    # Microsoft 로그아웃으로 끝난 사용자: uid → 끝난 시각. 그 전에 시작한 SEN 세션은 쓰지 않는다.
+    # 이 기록은 메모리에만 있으므로, 서버가 시작되기 전에 만든 세션도 쓰지 않는다(재시작 뒤 다시 로그인).
+    ended, started = {}, time.time()
+    uid_by_immutable_id = {a["immutableId"]: uid for uid, u in users.items() for a in u.get("accounts", [])}
     lock = threading.Lock()
 
     def log(event, **fields):
@@ -171,6 +175,13 @@ def create_app(overrides=None):
             return hint.split("@")[0]
         return None
 
+    @app.before_request
+    def drop_ended_session():
+        uid = session.get("uid")
+        if uid and session.get("iat", 0) <= max(ended.get(uid, 0), started):
+            log("session_ended", uid=uid)
+            session.clear()
+
     @app.after_request
     def security_headers(resp):
         resp.headers.setdefault("X-Frame-Options", "DENY")
@@ -229,6 +240,7 @@ def create_app(overrides=None):
         session.permanent = True
         session["uid"] = uid
         session["auth_time"] = sc.fmt(sc.utcnow())
+        session["iat"] = time.time()
         if p:
             with lock:
                 p["logged_in"] = True
@@ -343,7 +355,15 @@ def create_app(overrides=None):
         binding = "redirect" if request.method == "GET" else "post"
         src = request.args if binding == "redirect" else request.form
         info = sc.describe_logout_request(src["SAMLRequest"], binding) if src.get("SAMLRequest") else {}
-        log("logout_request", binding=binding, paramKeys=sorted(src.keys()), uid=session.get("uid"), **info)
+        # Microsoft는 로그아웃 화면 안에서 이 요청을 보내므로 브라우저가 SEN 쿠키를 붙이지 않을 수 있다.
+        # 그래서 NameID(ImmutableID)로 사용자를 찾아, 그 사용자가 이 시각 전에 시작한 SEN 세션을 서버에서 끝낸다.
+        target = uid_by_immutable_id.get(info.get("name_id", "")) \
+            if info.get("type") == "LogoutRequest" and info.get("issuer") == sc.ENTRA_SP_ENTITY_ID else None
+        if target:
+            with lock:
+                ended[target] = time.time()
+        log("logout_request", binding=binding, paramKeys=sorted(src.keys()), uid=session.get("uid"), endedUid=target,
+            fetchDest=request.headers.get("Sec-Fetch-Dest"), fetchSite=request.headers.get("Sec-Fetch-Site"), **info)
         session.clear()
         return message("로그아웃되었습니다. 창을 닫아도 됩니다.")
 

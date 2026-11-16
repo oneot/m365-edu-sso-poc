@@ -299,6 +299,27 @@ def test_login_page_shows_error_and_keeps_typed_id(client):
     assert "아이디 또는 비밀번호가 맞지 않습니다." in page and 'value="student01"' in page and "학교 A" in page
 
 
+def logout_request(name_id):
+    return ('<samlp:LogoutRequest ID="_lo1" Version="2.0" IssueInstant="2026-11-17T00:00:00Z" '
+            'xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+            '<saml:Issuer>urn:federation:MicrosoftOnline</saml:Issuer>'
+            f'<saml:NameID>{name_id}</saml:NameID></samlp:LogoutRequest>').encode()
+
+
+def test_microsoft_logout_ends_sen_session_without_cookie(app):
+    # Microsoft는 로그아웃 화면 안에서 요청을 보내 SEN 쿠키가 오지 않을 수 있다. 그래도 그 사용자의 SEN 세션은 끝나야 한다
+    c = app.test_client()
+    full_flow(c, D1, "student01")
+    no_cookie = app.test_client()
+    get(no_cookie, "/saml/m365/slo", query_string={"SAMLRequest": redirect_param(logout_request("immstudent02"))})
+    assert get(c, "/").status_code == 200  # 다른 사용자의 로그아웃은 영향 없음
+    get(no_cookie, "/saml/m365/slo", query_string={"SAMLRequest": redirect_param(logout_request("immstudent01"))})
+    assert urlparse(get(c, "/").location).path == "/login"
+    assert urlparse(start_sso(c, D1, "_req2").location).path == "/login"
+    login(c, "student01")
+    assert get(c, "/").status_code == 200
+
+
 def test_admin_log_requires_token(client):
     assert get(client, "/admin/log.json").status_code == 404
     full_flow(client, D1, "student01")

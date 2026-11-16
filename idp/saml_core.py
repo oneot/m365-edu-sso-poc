@@ -94,6 +94,8 @@ def describe_logout_request(saml_request, binding):
         "id": root.get("ID"),
         "issuer": (root.findtext(f"{{{NS_SAML}}}Issuer") or "").strip(),
         "name_id": (root.findtext(f"{{{NS_SAML}}}NameID") or "").strip(),
+        "session_index": [(s.text or "").strip() for s in root.findall(f"{{{NS_SAMLP}}}SessionIndex")],
+        "not_on_or_after": root.get("NotOnOrAfter"),
     }
 
 
