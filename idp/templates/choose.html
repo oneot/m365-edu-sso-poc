@@ -1,16 +1,18 @@
 {% extends "_layout.html" %}
-{% block title %}학교 선택 · 학교 SSO (PoC){% endblock %}
+{% block title %}학교 선택 (PoC){% endblock %}
 {% block body %}
-<main class="sheet">
-  <h1>어느 학교로 로그인할까요?</h1>
+<div class="glass card">
+  {% include "_logo.html" %}
+  <h1 class="title">어느 학교로 로그인할까요?</h1>
   <p class="sub">{{ name }}님은 여러 학교에 계정이 있습니다. 들어갈 학교를 고르세요.</p>
-  <form method="post" action="{{ url_for('saml_continue') }}" class="choices">
+  <form method="post" action="{{ url_for('saml_continue') }}" class="group choices">
     <input type="hidden" name="k" value="{{ k }}">
     {% for c in choices %}
     <button class="choice" type="submit" name="domain" value="{{ c.domain }}">
-      <strong>{{ c.school }}</strong><span>{{ c.upn }}</span>
+      <span class="text"><span class="name">{{ c.school }}</span><span class="upn">{{ c.upn }}</span></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>
     </button>
     {% endfor %}
   </form>
-</main>
+</div>
 {% endblock %}

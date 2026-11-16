@@ -1,8 +1,9 @@
 {% extends "_layout.html" %}
-{% block title %}{{ title }} · 학교 SSO (PoC){% endblock %}
+{% block title %}{{ title }} (PoC){% endblock %}
 {% block body %}
-<main class="sheet">
-  <h1>{{ title }}</h1>
+<div class="glass card">
+  {% include "_logo.html" %}
+  <h1 class="title">{{ title }}</h1>
   <p class="sub">{{ text }}</p>
-</main>
+</div>
 {% endblock %}

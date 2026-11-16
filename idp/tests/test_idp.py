@@ -292,6 +292,17 @@ def test_login_page_served_by_idp_with_frame_protection(client):
     assert page.headers["X-Frame-Options"] == "DENY"
 
 
+def test_login_shows_school_name_only_for_school_domains(client):
+    # 라우팅 도메인(SEN 아이디)은 아직 학교가 정해지지 않았으므로 학교 이름을 띄우지 않는다
+    assert qs_of(start_sso(client, D1).location)["school"] == "학교 A"
+    assert "school" not in qs_of(start_sso(client, DR, "_req2", username=f"student02@{DR}").location)
+
+
+def test_login_page_shows_error_and_keeps_typed_id(client):
+    page = get(client, "/login", query_string={"err": "1", "school": "학교 A", "user": "student01"}).get_data(as_text=True)
+    assert "아이디 또는 비밀번호가 맞지 않습니다." in page and 'value="student01"' in page and "학교 A" in page
+
+
 def test_admin_log_requires_token(client):
     assert get(client, "/admin/log.json").status_code == 404
     full_flow(client, D1, "student01")

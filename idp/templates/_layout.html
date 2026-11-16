@@ -1,15 +1,21 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" class="init">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
   <meta name="robots" content="noindex, nofollow">
-  <title>{% block title %}학교 SSO 로그인 (PoC){% endblock %}</title>
+  <title>{% block title %}로그인 (PoC){% endblock %}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
 </head>
 <body>
+<div class="light" aria-hidden="true"><i></i><i></i></div>
+<main class="stage">
 {% block body %}{% endblock %}
+</main>
+{% block note %}{% endblock %}
+<script src="{{ url_for('static', filename='login.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -27,7 +27,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.idp-login"
+VERSION = "2026-11-17.design-b"
 
 
 def _b64_env(name):
@@ -115,6 +115,11 @@ def create_app(overrides=None):
     def message(text, status=200, title="안내"):
         return render_template("message.html", title=title, text=text), status
 
+    def school_label(domain):
+        # 라우팅 도메인(SEN 아이디)은 아직 학교가 정해지지 않았으므로 로그인 화면에 학교 이름을 띄우지 않는다.
+        d = domains.get(domain or "", {})
+        return None if d.get("mode") == "route" else d.get("schoolName")
+
     def to_login(k=None, err=None, school=None, user=None):
         params = {key: v for key, v in {"k": k, "err": err, "school": school, "user": user}.items() if v}
         return redirect(url_for("login", **params))
@@ -195,7 +200,7 @@ def create_app(overrides=None):
         too_many = rate_limited(ip)
         k = request.form.get("k") or None
         p = get_pending(k) if k else None
-        school = domains.get(p["domain"], {}).get("schoolName") if p else None
+        school = school_label(p["domain"]) if p else None
         if too_many:
             log("login_blocked", ip=ip)
             return to_login(k=k, err="locked", school=school)
@@ -261,9 +266,9 @@ def create_app(overrides=None):
         if mismatch:
             # 공용 PC 등: 브라우저에 남은 다른 사용자의 세션으로 응답하지 않고, 입력한 아이디로 다시 로그인시킨다.
             log("hint_mismatch", domain=domain, sessionUid=uid, hint=hint)
-            return to_login(k=k, err="switch", school=domains[domain].get("schoolName"), user=prefill_for(domain, hint))
+            return to_login(k=k, err="switch", school=school_label(domain), user=prefill_for(domain, hint))
         if need_login:
-            return to_login(k=k, school=domains[domain].get("schoolName"), user=prefill_for(domain, hint))
+            return to_login(k=k, school=school_label(domain), user=prefill_for(domain, hint))
         return redirect(url_for("saml_continue", k=k))
 
     @app.route("/saml/continue", methods=["GET", "POST"])
@@ -274,7 +279,7 @@ def create_app(overrides=None):
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
         uid = session.get("uid")
         if not uid or uid not in users or (p.get("needs_login") and not p.get("logged_in")):
-            return to_login(k=k, school=domains[p["domain"]].get("schoolName"), user=prefill_for(p["domain"], p.get("hint")))
+            return to_login(k=k, school=school_label(p["domain"]), user=prefill_for(p["domain"], p.get("hint")))
         user = users[uid]
         dcfg = domains[p["domain"]]
         accounts = user.get("accounts", [])
