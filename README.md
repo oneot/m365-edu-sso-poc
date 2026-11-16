@@ -1,6 +1,6 @@
 # SEN – Microsoft 365 SSO PoC
 
-학교별 Microsoft 365 테넌트를 그대로 두고 SEN IdP 한 벌로 SSO하는 방식을 실제 테넌트에서 검증했습니다.
+학교별 Microsoft 365 멀티 테넌트 구조에서 SEN IdP 한 벌로 SSO하는 방식을 실제 테넌트에서 검증한 POC입니다.
 
 ## 1. 결론
 
