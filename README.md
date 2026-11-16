@@ -1,6 +1,6 @@
 # SEN – Microsoft 365 SSO PoC
 
-학교별 Microsoft 365 테넌트를 그대로 두고 SEN IdP 한 벌로 SSO하는 방식을 실제 테넌트에서 검증했습니다. 시연 영상은 https://demo.joowon.me 에 있습니다.
+학교별 Microsoft 365 테넌트를 그대로 두고 SEN IdP 한 벌로 SSO하는 방식을 실제 테넌트에서 검증했습니다.
 
 ## 1. 결론
 
@@ -23,8 +23,8 @@
 
 - **라우팅 전용 테넌트:** 학생·교사 계정과 라이선스 없이 SEN 아이디 도메인만 등록합니다. 라우팅 설정(페더레이션)은 이 테넌트 관리자만 바꿀 수 있어, 학교 테넌트 관리자는 전체 학생의 SEN 아이디 로그인 경로를 바꿀 수 없습니다.
 - **주소**
-  - `https://auth.joowon.me`: SEN IdP(SEN 로그인 화면 `/login`, SAML, SEN 포털)
-  - `demo.joowon.me`: 시연 영상(기본 SSO, 거부, SEN 아이디 라우팅, 보안 데모, 관리 포털)
+  - https://auth.joowon.me : SEN IdP(SEN 로그인 화면 `/login`, SAML, SEN 포털)
+  - https://m365.cloud.microsoft : Microsoft 365 로그인 화면
 - **테스트 계정**
   - 학생·교사: `student01`·`student02`·`teacher01`
   - MFA 필수: `mfa01`·`mfa02`
