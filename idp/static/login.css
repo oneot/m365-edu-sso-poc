@@ -140,7 +140,7 @@ a { color: inherit; }
 .round:disabled { opacity: .4; cursor: default; }
 .round:not(:disabled):hover, .chip:hover, .btn:hover { transform: scale(1.05); }
 .round:not(:disabled):active, .chip:active, .btn:active { transform: scale(.92); transition-duration: .15s; }
-.round:focus-visible, .chip:focus-visible, .btn:focus-visible, .icon:focus-visible, .choice:focus-visible {
+.round:focus-visible, .chip:focus-visible, .btn:focus-visible, .icon:focus-visible {
   outline: 2px solid rgba(15, 23, 42, .16); outline-offset: 3px;
 }
 .chip {
@@ -177,19 +177,6 @@ a { color: inherit; }
 .later { animation: later .4s var(--ease) 3s both; }
 @keyframes later { from { opacity: 0; visibility: hidden; } }
 
-/* 학교 선택 */
-.choices { width: 100%; margin: 28px 0 0; overflow: hidden; }
-.choice {
-  position: relative; display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 14px 14px 20px;
-  border: 0; background: none; text-align: left; cursor: pointer; transition: background .2s var(--ease);
-}
-.choice + .choice::before { content: ""; position: absolute; top: 0; left: 20px; right: 0; height: 1px; background: rgba(15, 23, 42, .07); }
-.choice:hover { background: rgba(255, 255, 255, .7); }
-.choice .text { flex: 1; min-width: 0; }
-.choice .name { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-.choice .upn, .tenant .upn { display: block; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
-.choice svg { flex: none; width: 18px; height: 18px; color: var(--hint); }
-
 /* SEN 포털(로그인 뒤) */
 .card.wide { width: min(560px, 100%); align-items: stretch; padding: 32px 28px 28px; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -197,7 +184,7 @@ a { color: inherit; }
 .card.wide .sub { text-align: left; }
 .tenant { margin-top: 24px; padding: 18px 20px 20px; }
 .tenant h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-.tenant .upn { margin-top: 2px; }
+.tenant .upn { display: block; margin-top: 2px; font: 13px/1.5 var(--mono); color: var(--muted); word-break: break-all; }
 .tenant .btn { margin-top: 16px; }
 
 /* IdP 기록 */

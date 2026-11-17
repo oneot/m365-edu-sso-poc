@@ -1,13 +1,12 @@
-"""④ 라우팅 도메인 브라우저 시연: 실제 Microsoft 웹앱에 통합 아이디로 로그인하고 단계별 화면을 저장한다.
+"""루트 2(SEN 아이디) 브라우저 시연: 실제 Microsoft 웹앱에 SEN 아이디로 로그인하고 단계별 화면을 저장한다.
 
 헤드리스 Chrome(Playwright, 임시 프로필)이 사람이 하는 순서를 그대로 따른다.
-  1) 앱 접속 → Microsoft 로그인 화면에 통합 아이디 입력
+  1) 앱 접속 → Microsoft 로그인 화면에 SEN 아이디 입력
   2) SEN 로그인 화면(IdP의 /login)에 비밀번호 입력(아이디는 IdP가 미리 채움)
-  3) 학교 선택(여러 학교 소속)
-  4) Microsoft 확인 화면(도메인 확인, 로그인 상태 유지)
-  5) 앱 화면
+  3) Microsoft 확인 화면(도메인 확인, 로그인 상태 유지)
+  4) 앱 화면
 
-사용: python browser_route_demo.py --password-file <파일> --out-dir <폴더> [--flow outlook teams] [--route joowon.me]
+사용: python browser_route_demo.py --password-file <파일> --out-dir <폴더> [--flow outlook teams m365] [--route joowon.me]
 """
 import argparse
 import json
@@ -19,19 +18,18 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 
-ROUTE = "id.joowon.me"
+ROUTE = "joowon.me"
 IDP_HOST = "auth.joowon.me"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/157.0.0.0 Safari/537.36")
 def make_flows(route):
     return {
-        # 이름: (앱 주소, 통합 아이디, IdP 아이디, 고를 학교 도메인, 앱 주소 판별)
-        "outlook": ("https://outlook.office.com/mail/", f"student02@{route}", "student02", None, "outlook."),
-        "teams": ("https://teams.microsoft.com/v2/", f"multi01@{route}", "multi01", "school1.joowon.me",
-                  "teams."),
-        # 포털 링크(login_hint=통합 아이디): 아이디 입력 없이 진행되어 도메인 확인 대화상자가 뜨는 경로
-        "m365": (f"https://www.office.com/?auth=2&login_hint=student02%40{route}", f"student02@{route}", "student02", None,
-                 "m365.cloud"),
+        # 이름: (앱 주소, SEN 아이디, IdP 아이디, 앱 화면 판별 호스트)
+        "outlook": ("https://outlook.office.com/mail/", f"student02@{route}", "student02", ("outlook.",)),
+        "teams": ("https://teams.microsoft.com/v2/", f"student01@{route}", "student01", ("teams.",)),
+        # Microsoft 365 링크(login_hint=SEN 아이디): 아이디 입력 없이 진행되어 도메인 확인 대화상자가 뜨는 경로
+        "m365": (f"https://m365.cloud.microsoft/login?es=Click&login_hint=student02%40{route}", f"student02@{route}",
+                 "student02", ("m365.cloud", "copilot.cloud")),
     }
 
 
@@ -51,7 +49,7 @@ def click_first(page, selectors):
 
 
 def run_flow(pw, name, args, password):
-    url, routing_id, idp_user, choose, app_host = FLOWS[name]
+    url, sen_id, idp_user, app_host = FLOWS[name]
     out_dir = os.path.join(args.out_dir, name)
     os.makedirs(out_dir, exist_ok=True)
     browser = pw.chromium.launch(channel="chrome", headless=not args.headed)
@@ -67,7 +65,7 @@ def run_flow(pw, name, args, password):
 
     page.goto(url)
     deadline = time.time() + args.timeout
-    result = {"flow": name, "routingId": routing_id}
+    result = {"flow": name, "senId": sen_id}
     while time.time() < deadline:
         page.wait_for_timeout(1200)
         try:
@@ -86,8 +84,8 @@ def run_flow(pw, name, args, password):
                 break
             email = page.locator("input[name=loginfmt]")
             if "username" not in done and email.count() and email.first.is_visible():
-                email.first.fill(routing_id)
-                shot("ms-signin-routing-id")
+                email.first.fill(sen_id)
+                shot("ms-signin-sen-id")
                 click_first(page, ["#idSIButton9", "input[type=submit]", "button[type=submit]"])
                 done.add("username")
                 continue
@@ -113,12 +111,7 @@ def run_flow(pw, name, args, password):
             page.locator("#password").fill(password)
             page.locator("button[type=submit]").click()
             done.add("idp-login")
-        elif host == IDP_HOST:
-            if "choose" not in done and page.locator("button[name=domain]").count():
-                shot("sen-choose-school")
-                page.locator(f"button[name=domain][value='{choose}']").click()
-                done.add("choose")
-        elif app_host in host and "idp-login" in done:
+        elif any(h in host for h in app_host) and "idp-login" in done:
             page.wait_for_timeout(args.settle * 1000)
             result.update(result="app", title=page.title(), url=f"{host}{urlparse(page.url).path}")
             shot("app")
@@ -146,7 +139,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=150)
     ap.add_argument("--settle", type=int, default=25, help="앱 화면이 다 그려질 때까지 기다리는 초")
     ap.add_argument("--headed", action="store_true")
-    ap.add_argument("--route", default=ROUTE, help="통합 아이디 도메인(예: 루트 SEN 아이디 도메인 joowon.me)")
+    ap.add_argument("--route", default=ROUTE, help="SEN 아이디 도메인(기본 joowon.me)")
     args = ap.parse_args()
     FLOWS.update(make_flows(args.route))
     password = open(args.password_file, encoding="utf-8").read().strip()

@@ -1,16 +1,13 @@
 """테스트용 SAML 2.0 IdP (Microsoft 365 다중 테넌트 도메인 페더레이션 PoC).
 
-IdP 한 벌로 여러 테넌트를 처리한다.
-- 테넌트(학교) 구분: 로그인 주소의 도메인  /saml/m365/<domain>/sso
-- Entra 요구사항: 도메인마다 고유한 Issuer  {IDP_BASE_URL}/saml/m365/<domain>
+IdP 한 벌로 여러 학교 테넌트를 처리한다.
+- 학교 구분: 로그인 주소의 도메인 /saml/m365/<domain>/sso. Issuer는 도메인마다 {IDP_BASE_URL}/saml/m365/<domain>
 - 서명 인증서: 모든 도메인 공통 1개(교체용 next 인증서 지원)
-- 인증: IdP는 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 직접 수행하므로
-  (도메인 federatedIdpMfaBehavior=rejectMfaByFederatedIdp) MFA 수행 표시(multipleauthn)를 보내지 않는다.
-- 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
-- auth.joowon.me에 들어오면 늘 아이디·비밀번호를 묻고, 로그인한 바로 뒤(루트 1) SEN 포털 화면에 학교 계정과
-  'Microsoft 365로 이동하기'를 보여 준다.
+- 인증: 1차 인증(아이디·비밀번호)만 한다. MFA는 Entra가 수행한다(federatedIdpMfaBehavior=rejectMfaByFederatedIdp).
+- SEN 아이디 도메인(mode=route): SEN 아이디에 연결된 학교 계정(학교 테넌트 1곳)의 도메인 Issuer로 응답한다.
+- auth.joowon.me에 들어오면 늘 아이디·비밀번호를 묻고, 로그인한 바로 뒤에만 SEN 포털을 보여 준다(루트 1).
 - SEN 로그인은 기본 8시간 유지한다(IDP_SESSION_MINUTES). 그동안 Microsoft가 같은 계정의 로그인을 다시 요청하면
-  (예: m365.cloud.microsoft 재방문) 비밀번호 없이 응답한다. auth.joowon.me에 직접 들어오면 늘 아이디·비밀번호를 묻는다.
+  비밀번호 없이 응답하고, 다른 계정이면 다시 로그인시킨다.
 """
 import base64
 import collections
@@ -31,7 +28,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.sso-8h"
+VERSION = "2026-11-17.cleanup"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -58,7 +55,7 @@ def _env_config():
         return ""
     return {
         "IDP_BASE_URL": os.environ.get("IDP_BASE_URL", "https://auth.joowon.me").rstrip("/"),
-        # IdP 아이디의 도메인 표시(예: 학번@joowon.me). Entra 도메인과는 무관한 IdP 내부 아이디다.
+        # SEN 아이디 도메인(예: student01@joowon.me). 로그인 화면에 붙여 보여 주고 입력값에서는 떼어 낸다.
         "ID_DOMAIN": os.environ.get("IDP_ID_DOMAIN", "joowon.me"),
         "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
         "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
@@ -174,7 +171,7 @@ def create_app(overrides=None):
         return any(a["upn"].lower() == hint for a in users.get(uid, {}).get("accounts", []))
 
     def prefill_for(domain, hint):
-        # 라우팅 도메인은 입력값의 앞부분이 곧 IdP 아이디. 학교 도메인은 아이디 노출을 막으려고 채우지 않는다.
+        # SEN 아이디 도메인은 입력값의 앞부분이 곧 SEN 아이디. 학교 도메인은 아이디 노출을 막으려고 채우지 않는다.
         if hint and domains.get(domain, {}).get("mode") == "route":
             return hint.split("@")[0]
         return None
@@ -252,17 +249,16 @@ def create_app(overrides=None):
         session.clear()
         session.permanent = True
         session["uid"] = uid
-        session["auth_time"] = sc.fmt(sc.utcnow())
-        session["iat"] = time.time()
+        session["iat"] = time.time()  # 로그인 시각(세션 만료·로그아웃 판단, SAML AuthnInstant)
+        log("login_ok", uid=uid, ip=ip, pending=bool(p))
         if p:
             with lock:
                 p["logged_in"] = True
-        else:
-            session["fresh"] = True
-        log("login_ok", uid=uid, ip=ip, pending=bool(p), via=request.headers.get("Origin") or "same-origin")
-        if k and not p:
+            return redirect(url_for("saml_continue", k=k))
+        if k:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
-        return redirect(url_for("saml_continue", k=k) if p else url_for("home"))
+        session["fresh"] = True
+        return redirect(url_for("home"))
 
     @app.get("/logout")
     def logout():
@@ -295,8 +291,7 @@ def create_app(overrides=None):
         uid = session.get("uid")
         mismatch = bool(uid and hint and not hint_matches(uid, domain, hint))
         need_login = not uid or req["force_authn"] or mismatch
-        k = put_pending({"domain": domain, "request_id": req["id"], "relay": relay, "binding": binding, "hint": hint,
-                         "needs_login": need_login})
+        k = put_pending({"domain": domain, "request_id": req["id"], "relay": relay, "hint": hint, "needs_login": need_login})
 
         if req["is_passive"] and need_login:
             xml = sc.build_status_response(issuer=issuer_for(domain), in_response_to=req["id"],
@@ -311,33 +306,20 @@ def create_app(overrides=None):
             return to_login(k=k, school=school_label(domain), user=prefill_for(domain, hint))
         return redirect(url_for("saml_continue", k=k))
 
-    @app.route("/saml/continue", methods=["GET", "POST"])
+    @app.get("/saml/continue")
     def saml_continue():
-        k = request.values.get("k")
+        k = request.args.get("k")
         p = get_pending(k)
         if not p:
             return message("로그인 요청이 만료됐습니다. 앱이나 사이트에서 다시 시작해 주세요.", 400)
         uid = session.get("uid")
-        if not uid or uid not in users or (p.get("needs_login") and not p.get("logged_in")):
-            return to_login(k=k, school=school_label(p["domain"]), user=prefill_for(p["domain"], p.get("hint")))
+        if not uid or uid not in users or (p["needs_login"] and not p.get("logged_in")):
+            return to_login(k=k, school=school_label(p["domain"]), user=prefill_for(p["domain"], p["hint"]))
         user = users[uid]
-        dcfg = domains[p["domain"]]
         accounts = user.get("accounts", [])
-
-        if dcfg.get("mode") == "route":
-            chosen = (request.form.get("domain") if request.method == "POST" else None) or p.get("chosen")
-            if chosen:
-                target = next((a for a in accounts if a["domain"] == chosen), None)
-            elif len(accounts) == 1:
-                target = accounts[0]
-            else:
-                choices = [{"domain": a["domain"], "upn": a["upn"],
-                            "school": domains.get(a["domain"], {}).get("schoolName", a["domain"])} for a in accounts]
-                log("route_choose", uid=uid, options=[c["domain"] for c in choices])
-                return render_template("choose.html", k=k, choices=choices, name=user.get("name", uid))
-        else:
-            target = next((a for a in accounts if a["domain"] == p["domain"]), None)
-
+        route = domains[p["domain"]].get("mode") == "route"
+        # SEN 아이디 도메인이면 그 아이디의 학교 계정(학교 테넌트 1곳), 학교 도메인이면 그 학교의 계정
+        target = next((a for a in accounts if route or a["domain"] == p["domain"]), None)
         if not target:
             log("no_linked_account", uid=uid, domain=p["domain"])
             return message("이 학교(테넌트)에 연결된 계정이 없습니다. 다른 아이디로 로그인해 주세요.", 403)
@@ -345,24 +327,20 @@ def create_app(overrides=None):
         flags = user.get("flags", {})
         if flags.get("badIssuer"):
             issuer = issuer_for("unregistered.invalid")
-        elif flags.get("routeIssuerFromRequest") and dcfg.get("mode") == "route":
-            # 시험용: 라우팅 도메인 자신의 Issuer로 응답(학교 계정과 realm이 달라 교차 도메인 로그인이 됨)
-            issuer = issuer_for(p["domain"])
+        elif flags.get("routeIssuerFromRequest") and route:
+            issuer = issuer_for(p["domain"])  # 시험용 잘못된 구현(R11): 학교 도메인이 아닌 라우팅 도메인 Issuer
         else:
             issuer = issuer_for(target["domain"])
         key, cert = cfg["KEYS"][cfg["ACTIVE_SIGNING"]]
-        auth_time = dt.datetime.strptime(session.get("auth_time"), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) \
-            if session.get("auth_time") else None
         xml = sc.build_response(issuer=issuer, in_response_to=p["request_id"], name_id=target["immutableId"],
                                 upn=target["upn"], key_pem=key, cert_pem=cert,
-                                auth_instant=auth_time, tamper=bool(flags.get("badSignature")))
+                                auth_instant=dt.datetime.fromtimestamp(session["iat"], dt.timezone.utc),
+                                tamper=bool(flags.get("badSignature")))
         with lock:
             pending.pop(k, None)
-        log("saml_response", uid=uid, requestDomain=p["domain"], targetDomain=target["domain"],
-            routed=target["domain"] != p["domain"], upn=target["upn"], issuer=issuer, inResponseTo=p["request_id"],
-            signing=cfg["ACTIVE_SIGNING"], tamper=bool(flags.get("badSignature")),
-            typed=p.get("hint") or None,
-            typedOverridden=bool(p.get("hint") and not hint_matches(uid, p["domain"], p["hint"])))
+        log("saml_response", uid=uid, requestDomain=p["domain"], targetDomain=target["domain"], upn=target["upn"],
+            issuer=issuer, inResponseTo=p["request_id"], signing=cfg["ACTIVE_SIGNING"],
+            tamper=bool(flags.get("badSignature")))
         return post_to_entra({"SAMLResponse": base64.b64encode(xml).decode(), "RelayState": p["relay"]})
 
     @app.route("/saml/m365/slo", methods=["GET", "POST"])
@@ -377,8 +355,7 @@ def create_app(overrides=None):
         if target:
             with lock:
                 ended[target] = time.time()
-        log("logout_request", binding=binding, paramKeys=sorted(src.keys()), uid=session.get("uid"), endedUid=target,
-            fetchDest=request.headers.get("Sec-Fetch-Dest"), fetchSite=request.headers.get("Sec-Fetch-Site"), **info)
+        log("logout_request", binding=binding, uid=session.get("uid"), endedUid=target, **info)
         session.clear()
         return message("로그아웃되었습니다. 창을 닫아도 됩니다.")
 

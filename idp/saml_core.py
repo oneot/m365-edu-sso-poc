@@ -59,8 +59,7 @@ def decode_request(saml_request, binding):
         raise ValueError("SAMLRequest가 너무 큽니다")
     if binding == "redirect":
         try:
-            out = zlib.decompressobj(-15).decompress(raw, _MAX_REQUEST_BYTES)
-            return out
+            return zlib.decompressobj(-15).decompress(raw, _MAX_REQUEST_BYTES)
         except zlib.error:
             return raw
     return raw
@@ -74,9 +73,6 @@ def parse_authn_request(saml_request, binding):
     return {
         "id": root.get("ID"),
         "issuer": (root.findtext(f"{{{NS_SAML}}}Issuer") or "").strip(),
-        "issue_instant": root.get("IssueInstant"),
-        "destination": root.get("Destination"),
-        "acs_url": root.get("AssertionConsumerServiceURL"),
         "force_authn": root.get("ForceAuthn") == "true",
         "is_passive": root.get("IsPassive") == "true",
         "nameid_format": policy.get("Format") if policy is not None else None,
@@ -87,15 +83,13 @@ def parse_authn_request(saml_request, binding):
 def describe_logout_request(saml_request, binding):
     try:
         root = etree.fromstring(decode_request(saml_request, binding), parser=_PARSER)
-    except Exception:  # 기록용이라 실패해도 로그아웃은 진행
+    except Exception:  # 해석하지 못해도 로그아웃은 진행
         return {"parse_error": True}
     return {
         "type": etree.QName(root).localname,
         "id": root.get("ID"),
         "issuer": (root.findtext(f"{{{NS_SAML}}}Issuer") or "").strip(),
         "name_id": (root.findtext(f"{{{NS_SAML}}}NameID") or "").strip(),
-        "session_index": [(s.text or "").strip() for s in root.findall(f"{{{NS_SAMLP}}}SessionIndex")],
-        "not_on_or_after": root.get("NotOnOrAfter"),
     }
 
 
@@ -165,15 +159,13 @@ def build_response(*, issuer, in_response_to, name_id, upn, key_pem, cert_pem, a
     return etree.tostring(resp, encoding="utf-8")
 
 
-def build_status_response(*, issuer, in_response_to, second_level=None, message=None, now=None):
+def build_status_response(*, issuer, in_response_to, second_level=None, now=None):
     """실패 상태 응답(예: IsPassive 요청인데 로그인 세션이 없을 때 NoPassive)."""
     resp = _response_shell(issuer, in_response_to, now or utcnow())
     status = _el(resp, NS_SAMLP, "Status")
     top = _el(status, NS_SAMLP, "StatusCode", Value=STATUS_RESPONDER)
     if second_level:
         _el(top, NS_SAMLP, "StatusCode", Value=second_level)
-    if message:
-        _el(status, NS_SAMLP, "StatusMessage", message)
     return etree.tostring(resp, encoding="utf-8")
 
 

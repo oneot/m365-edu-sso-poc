@@ -1,4 +1,4 @@
-"""시연 영상 녹화: 헤드리스 Chromium으로 SSO·거부·④ 라우팅·보안 시나리오를 녹화해 MP4(H.264)와 포스터를 만든다.
+"""시연 영상 녹화: 헤드리스 Chromium으로 SSO·거부·SEN 아이디(루트 2)·보안 시나리오를 녹화해 MP4(H.264)와 포스터를 만든다.
 
 - 브라우저: Playwright 내장 Chromium. 설치된 Chrome은 회사 정책(SSO 확장)이 다른 계정을 끼워 넣을 수 있어 쓰지 않는다.
 - 시나리오마다 새 프로필(쿠키 없음), 1280×720. 영상 앞뒤에 시나리오 설명과 실행 결과 화면을 넣는다.
@@ -13,7 +13,7 @@
 
 사용:
   python record_demos.py --list
-  python record_demos.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> [--only A1 R1 ...]
+  python record_demos.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> [--only A1 R13 ...]
          [--proxy socks5://127.0.0.1:9050] [--portal-profile <폴더> --mask-file <JSON>]
   python record_demos.py --password-file <파일> --totp-file <JSON> --out-dir <폴더> --register <학교 계정 UPN> ...
          (Entra MFA 등록만 실행. 계정에 MFA 요구(사용자별 MFA 등)가 있어야 등록 화면이 뜬다)
@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 import requests
 from playwright.sync_api import sync_playwright
 
-from e2e_signin import AAD, CLIENT_ID, D1, D2, DR, DROOT, IDP, IDP_HOST, REDIRECT, b64url, jwt_claims, load_totp, totp_now
+from e2e_signin import AAD, CLIENT_ID, D1, D2, DR, IDP, IDP_HOST, REDIRECT, b64url, jwt_claims, load_totp, totp_now
 
 MS_HOSTS = ("login.microsoftonline.com", "login.microsoft.com", "login.windows.net")
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -54,14 +54,14 @@ FONT = "-apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic
 GROUPS = {
     "sso": "기본 SSO",
     "reject": "위조·오류 거부",
-    "route": "④ 통합 아이디(라우팅)",
+    "route": "SEN 아이디 로그인(루트 2)",
     "attack": "보안 데모: 위험 로그인 탐지·차단",
     "portal": "보안 데모: 관리 포털 화면",
 }
 APPS = {  # 이름: (표시 이름, 주소, 앱 화면 판별 호스트, 화면이 다 그려질 때까지 기다리는 초)
     "outlook": ("Outlook 웹", "https://outlook.office.com/mail/", ("outlook.office.com", "outlook.cloud.microsoft"), 14),
     "teams": ("Teams 웹", "https://teams.microsoft.com/v2/", ("teams.microsoft.com", "teams.cloud.microsoft"), 25),
-    "m365": ("Microsoft 365 웹", "https://www.office.com/?auth=2", ("m365.cloud.microsoft", "www.microsoft365.com",
+    "m365": ("Microsoft 365 웹", "https://m365.cloud.microsoft/", ("m365.cloud.microsoft", "www.microsoft365.com",
                                                                 "copilot.cloud.microsoft"), 12),
     "myapps": ("내 앱(My Apps)", "https://myapps.microsoft.com/", ("myapps.microsoft.com", "myapplications.microsoft.com"), 10),
 }
@@ -269,7 +269,7 @@ class Run:
             m = re.search(r"AADSTS(\d+)", res.get("desc", ""))
             res["code"] = m.group(1) if m else None
             res["desc"] = res.get("desc", "").split("\r\n")[0].split("\n")[0][:220]
-        res.update({k: self.trace.get(k) for k in ("password", "mfa", "chose", "registered")})
+        res.update({k: self.trace.get(k) for k in ("password", "mfa", "registered")})
         self.results[state] = res
         return self.result_page(res)
 
@@ -283,8 +283,6 @@ class Run:
             rows = [("오류", f"AADSTS{res.get('code')} {STS_TEXT.get(res.get('code') or '', '')}" if res.get("code")
                      else res.get("error")), ("Microsoft 응답", res.get("desc"))]
         rows.append(("SEN 비밀번호 입력", "예" if res.get("password") else "아니오(SEN 세션 사용)"))
-        if res.get("chose"):
-            rows.append(("SEN 학교 선택", res["chose"]))
         if res["result"] == "success":
             rows.append(("Microsoft MFA(Entra)", ("인증 앱 등록 후 코드 입력" if res.get("registered") else "인증 앱 코드 입력")
                          if res.get("mfa") else "요구되지 않음"))
@@ -295,23 +293,23 @@ class Run:
                 "</table><div class='foot'>앱이 받은 ID 토큰(preferred_username, tid)과 Microsoft 응답을 그대로 표시</div></div>")
         return page_html(body)
 
-    def cli(self, upn=None, *, idp_user=None, typed=False, choose=None, label=None, **kw):
+    def cli(self, upn=None, *, idp_user=None, typed=False, label=None, **kw):
         url, state = self.authorize(upn, hint=not typed, **kw)
         opts = ", ".join(f"{k}={v}" for k, v in kw.items() if k in ("domain_hint", "prompt") and v)
         self.step(label or f"앱 로그인 시작: {upn or '(힌트 없음)'}{' 직접 입력' if typed else ''}{' · ' + opts if opts else ''}")
         self.new_trace()  # 무음 로그인은 goto 직후 바로 결과가 오므로 미리 초기화
         self.auth_url = url
         self.page.goto(url, wait_until="commit")
-        out = self.drive(typed=upn if typed else None, idp_user=idp_user or (upn or "").split("@")[0], choose=choose,
+        out = self.drive(typed=upn if typed else None, idp_user=idp_user or (upn or "").split("@")[0],
                          state=state, account=upn)
         self.outcomes.append(out)
         return out
 
     # ---- 사람이 하는 순서대로 화면 진행
     def new_trace(self):
-        self.trace = {"password": False, "mfa": False, "chose": None, "registered": False}
+        self.trace = {"password": False, "mfa": False, "registered": False}
 
-    def drive(self, *, typed=None, idp_user=None, choose=None, state=None, app=None, account=None, timeout=150):
+    def drive(self, *, typed=None, idp_user=None, state=None, app=None, account=None, timeout=150):
         page, tr = self.page, self.trace
         seen_login, typed_done, otp_tries, done_pages, last_url = False, False, 0, set(), None
         deadline = time.time() + timeout
@@ -351,7 +349,7 @@ class Run:
                 page.wait_for_timeout(4500)
                 text = page.locator("body").inner_text(timeout=5000) if page.locator("body").count() else ""
                 return {"result": "app", "app": app, "accountShown": bool(account and account.lower() in text.lower()),
-                        "password": tr["password"], "mfa": tr["mfa"], "chose": tr["chose"]}
+                        "password": tr["password"], "mfa": tr["mfa"]}
             if host in MS_HOSTS:
                 seen_login = True
                 try:
@@ -453,7 +451,7 @@ class Run:
                     self.step(f"Microsoft 차단·오류 화면(AADSTS{code})")
                     page.wait_for_timeout(2000)
                     return {"result": "blocked", "code": code, "pgid": pgid, "desc": msg.split("\n")[0][:220],
-                            "password": tr["password"], "mfa": tr["mfa"], "chose": tr["chose"]}
+                            "password": tr["password"], "mfa": tr["mfa"]}
                 if account and pgid not in ("KmsiInterrupt", "CmsiInterrupt"):
                     heading = page.get_by_role("heading", name=re.compile("계정 선택|Pick an account"))
                     tile = page.locator(f"[data-test-id='{account}'], div[role='button']:has-text('{account}')")
@@ -503,16 +501,6 @@ class Run:
                 seen_login = True
                 if path.rstrip("/") == "":
                     continue  # SEN 포털 화면(단추를 누르면 넘어감)
-                if page.locator("button[name=domain]").count():
-                    pick = choose or page.locator("button[name=domain]").first.get_attribute("value")
-                    page.wait_for_timeout(1500)
-                    btn = page.locator(f"button[name=domain][value='{pick}']")
-                    btn.hover()
-                    page.wait_for_timeout(600)
-                    btn.click()
-                    tr["chose"] = self.rec.school_of_domain(pick)
-                    self.step(f"SEN 학교 선택: {tr['chose']}")
-                    continue
                 msg = page.locator("p.sub")
                 if msg.count() and not page.locator("form").count():
                     self.mark("key")
@@ -637,12 +625,12 @@ class Run:
         page.wait_for_selector("#goM365", timeout=30000)
         page.wait_for_timeout(2500)
 
-    def app(self, name, *, typed=None, idp_user=None, account=None, choose=None, goto=True, url=None):
+    def app(self, name, *, typed=None, idp_user=None, account=None, goto=True, url=None):
         self.new_trace()
         if goto:
             self.step(f"{APPS[name][0]} 접속")
             self.page.goto(url or APPS[name][1], wait_until="commit")
-        out = self.drive(typed=typed, idp_user=idp_user, choose=choose, app=name, account=account or typed)
+        out = self.drive(typed=typed, idp_user=idp_user, app=name, account=account or typed)
         self.outcomes.append(out)
         return out
 
@@ -650,8 +638,6 @@ class Run:
 # ---------------------------------------------------------------- 결과 판정·요약
 def success_line(out):
     extra = []
-    if out.get("chose"):
-        extra.append(f"학교 선택 {out['chose']}")
     extra.append("SEN 비밀번호 입력" if out.get("password") else "SEN 비밀번호 입력 없음")
     if out.get("mfa"):
         extra.append("Microsoft MFA 등록·코드 입력" if out.get("registered") else "Microsoft MFA 코드 입력")
@@ -718,12 +704,12 @@ def chain(*parts):
     return run
 
 
-def app_flow(name, typed_id, *, account=None, choose=None, idp_user=None):
+def app_flow(name, typed_id, *, account=None, idp_user=None):
     """실제 앱에 아이디를 입력해 로그인. account: 앱 계정 메뉴에 보여야 할 학교 계정(없으면 입력한 아이디)."""
     account = account or typed_id
 
     def run(r):
-        out = r.app(name, typed=typed_id, idp_user=idp_user or typed_id.split("@")[0], account=account, choose=choose)
+        out = r.app(name, typed=typed_id, idp_user=idp_user or typed_id.split("@")[0], account=account)
         r.result_lines.append(app_line(out, account))
         r.matched = expect_app(account)(out)
     return run
@@ -781,10 +767,6 @@ def scenarios(rec):
     add("A3", "sso", "Teams 웹에서 학교 A 계정 입력", [("계정", f"teacher01@{D1}"), ("앱", "Teams 웹")],
         "Microsoft 로그인 화면에 아이디를 직접 입력하는 흐름", "Teams 진입(학교 A 계정)",
         app_flow("teams", f"teacher01@{D1}"))
-    add("B1", "sso", "겸임교사: 학교 A 로그인 뒤 같은 브라우저로 학교 B", [("계정", f"multi01@{D1}, multi01@{D2}")],
-        "두 번째 학교는 SEN 비밀번호를 다시 묻지 않는지", "둘 다 성공, 학교 B는 비밀번호 입력 없음",
-        chain(("학교 A", lambda r: r.cli(f"multi01@{D1}"), expect_success(f"multi01@{D1}", A, password=True)),
-              ("학교 B", lambda r: r.cli(f"multi01@{D2}"), expect_success(f"multi01@{D2}", B, password=False))))
     add("C6", "sso", "MFA 대상 계정의 첫 로그인: Microsoft MFA 등록", [("계정", f"teacher01@{D1}"),
                                                                 ("Entra", "사용자별 MFA(녹화 동안만 적용), 등록한 인증 수단 없음")],
         "SEN 로그인 뒤 Microsoft 화면에서 인증 앱을 등록하고 로그인이 끝나는지(QR·비밀 키는 흐리게 처리)",
@@ -818,25 +800,13 @@ def scenarios(rec):
         "SEN이 보낸 고유키와 맞는 Entra 사용자가 없으면 거부하는지", "거부(AADSTS90019)",
         one(lambda r: r.cli(f"nomap01@{D1}"), expect_code("90019")))
     add("R11", "reject", "잘못된 구현: 라우팅 도메인 Issuer로 응답", [("계정", f"teacher01@{DR}")],
-        "통합 아이디로 들어왔을 때 학교 도메인이 아닌 Issuer로 답하면 막히는지", "거부(AADSTS5000820)",
-        one(lambda r: r.cli(f"teacher01@{DR}"), expect_code("5000820")))
-    add("R6", "reject", "라우팅 테넌트를 지정한 앱에 학교 B 학생", [("계정", f"student02@{DR}")],
-        "테넌트가 고정된 앱(라우팅 테넌트)에서는 다른 학교 학생이 거부되는지", "거부(AADSTS50020)",
+        "SEN 아이디로 들어왔을 때 학교 도메인이 아닌 Issuer로 답하면 막히는지", "거부(AADSTS90072)",
+        one(lambda r: r.cli(f"teacher01@{DR}", typed=True), expect_code("90072")))
+    add("R6", "reject", "라우팅 전용 테넌트를 지정한 앱에 학교 B 학생", [("계정", f"student02@{DR}")],
+        "테넌트가 고정된 앱(라우팅 전용 테넌트)에서는 학생이 거부되는지", "거부(AADSTS50020)",
         one(lambda r: r.cli(f"student02@{DR}", tenant=t(DR)), expect_code("50020")))
-    # ④ 라우팅
-    add("R1", "route", "통합 아이디 → 학교 B(다른 테넌트)", [("계정", f"student02@{DR}")],
-        "라우팅 테넌트에 페더레이션한 아이디로 시작해도 학교 B 계정으로 로그인되는지", "성공(학교 B)",
-        one(lambda r: r.cli(f"student02@{DR}"), expect_success(f"student02@{D2}", B)))
-    add("R2", "route", "통합 아이디 → 학교 A(같은 테넌트)", [("계정", f"student01@{DR}")],
-        "라우팅 테넌트와 같은 테넌트의 학교 계정으로 로그인되는지", "성공(학교 A)",
-        one(lambda r: r.cli(f"student01@{DR}"), expect_success(f"student01@{D1}", A)))
-    add("R3", "route", "겸임교사 통합 아이디 → 학교 선택", [("계정", f"multi01@{DR}")],
-        "여러 학교 소속이면 SEN이 학교를 고르게 하는지", "학교 B 선택 후 성공",
-        one(lambda r: r.cli(f"multi01@{DR}", choose=D2), expect_success(f"multi01@{D2}", B)))
-    add("R4", "route", "Microsoft 로그인 화면에 통합 아이디 직접 입력", [("계정", f"student02@{DR}")],
-        "사용자가 통합 아이디를 직접 입력해도 학교 B로 로그인되는지", "성공(학교 B)",
-        one(lambda r: r.cli(f"student02@{DR}", typed=True), expect_success(f"student02@{D2}", B)))
-    add("R5", "route", "학교 B 테넌트를 지정한 앱에 통합 아이디", [("계정", f"student02@{DR}")],
+    # 루트 2: SEN 아이디(라우팅 전용 테넌트에 페더레이션한 joowon.me)
+    add("R5", "route", "학교 B 테넌트를 지정한 앱에 SEN 아이디", [("계정", f"student02@{DR}")],
         "SharePoint처럼 테넌트가 고정된 앱에서도 되는지", "성공(학교 B)",
         one(lambda r: r.cli(f"student02@{DR}", tenant=t(D2)), expect_success(f"student02@{D2}", B)))
     add("R7", "route", "공용 PC: 앞 학생 세션이 남은 브라우저에서 다른 학생", [("계정", f"student01@{D1} → student02@{DR}")],
@@ -844,35 +814,33 @@ def scenarios(rec):
         chain(("앞 학생", lambda r: r.cli(f"student01@{D1}"), expect_success(f"student01@{D1}", A)),
               ("다음 학생", lambda r: r.cli(f"student02@{DR}"), expect_success(f"student02@{D2}", B, password=True))))
     add("R8", "route", "무음 로그인(prompt=none)", [("계정", f"student02@{DR}")],
-        "통합 아이디로 로그인한 뒤 앱의 무음 로그인이 어떤 힌트로 되는지", "학교 계정·힌트 없음은 성공, 통합 아이디 힌트는 AADSTS50058",
+        "SEN 아이디로 로그인한 뒤 앱의 무음 로그인이 어떤 힌트로 되는지", "학교 계정·힌트 없음은 성공, SEN 아이디 힌트는 AADSTS50058",
         chain(("로그인", lambda r: r.cli(f"student02@{DR}"), expect_success(f"student02@{D2}", B)),
               ("무음+학교 계정", lambda r: r.cli(f"student02@{D2}", prompt="none"), expect_success(f"student02@{D2}", B)),
               ("무음+힌트 없음", lambda r: r.cli(None, prompt="none", idp_user="student02"), expect_success(f"student02@{D2}", B)),
-              ("무음+통합 아이디", lambda r: r.cli(f"student02@{DR}", prompt="none"), expect_code("50058"))))
-    add("R9", "route", "SEN 포털 로그인 상태에서 domain_hint=라우팅 도메인", [("계정", "student02 (SEN 포털)")],
-        "포털에서 라우팅 도메인만 지정해도 비밀번호 없이 학교 B로 가는지", "성공(학교 B), 비밀번호 입력 없음",
+              ("무음+SEN 아이디", lambda r: r.cli(f"student02@{DR}", prompt="none"), expect_code("50058"))))
+    add("R9", "route", "SEN 포털 로그인 상태에서 domain_hint=SEN 아이디 도메인", [("계정", "student02 (SEN 포털)")],
+        "포털에서 SEN 아이디 도메인만 지정해도 비밀번호 없이 학교 B로 가는지", "성공(학교 B), 비밀번호 입력 없음",
         one(sen_then_cli("student02", domain_hint=DR), expect_success(f"student02@{D2}", B, password=False)))
-    add("R10", "route", "포털 링크(login_hint=통합 아이디) → Microsoft 365 웹", [("계정", f"student02@{DR}")],
-        "통합 아이디를 힌트로 넣은 앱 링크로 학교 B Microsoft 365에 들어가는지", "Microsoft 365 진입(학교 B)",
-        portal_url("student02", f"https://www.office.com/?auth=2&login_hint={quote('student02@' + DR)}", f"student02@{D2}"))
-    add("R12", "route", "MFA 필수 계정의 통합 아이디", [("계정", f"mfa02@{DR}")],
-        "통합 아이디로 들어와도 학교 B 계정에 Microsoft MFA가 적용되는지", "성공(학교 B), Microsoft MFA",
+    add("R10", "route", "Microsoft 365 웹 링크(login_hint=SEN 아이디)", [("계정", f"student02@{DR}")],
+        "SEN 아이디를 힌트로 넣은 링크로 학교 B Microsoft 365에 들어가는지", "Microsoft 365 진입(학교 B)",
+        portal_url("student02", f"https://m365.cloud.microsoft/login?es=Click&login_hint={quote('student02@' + DR)}",
+                   f"student02@{D2}"))
+    add("R12", "route", "MFA 필수 계정의 SEN 아이디", [("계정", f"mfa02@{DR}")],
+        "SEN 아이디로 들어와도 학교 B 계정에 Microsoft MFA가 적용되는지", "성공(학교 B), Microsoft MFA",
         one(lambda r: r.cli(f"mfa02@{DR}"), expect_success(f"mfa02@{D2}", B, mfa=True)))
-    add("R13", "route", "SEN 아이디 그대로 입력(student01@joowon.me) → 학교 A", [("계정", f"student01@{DROOT}")],
+    add("R13", "route", "SEN 아이디 직접 입력(student01@joowon.me) → 학교 A", [("계정", f"student01@{DR}")],
         "SEN 아이디(@senedu.kr 역할)를 그대로 입력해도 학교 계정으로 로그인되는지", "성공(학교 A)",
-        one(lambda r: r.cli(f"student01@{DROOT}", typed=True), expect_success(f"student01@{D1}", A)))
-    add("R14", "route", "SEN 아이디 그대로 입력(student02@joowon.me) → 학교 B", [("계정", f"student02@{DROOT}")],
+        one(lambda r: r.cli(f"student01@{DR}", typed=True), expect_success(f"student01@{D1}", A)))
+    add("R14", "route", "SEN 아이디 직접 입력(student02@joowon.me) → 학교 B", [("계정", f"student02@{DR}")],
         "다른 테넌트 학교로도 가는지", "성공(학교 B)",
-        one(lambda r: r.cli(f"student02@{DROOT}", typed=True), expect_success(f"student02@{D2}", B)))
-    add("R15", "route", "겸임교사 SEN 아이디 그대로 입력 → 학교 선택", [("계정", f"multi01@{DROOT}")],
-        "SEN 아이디 입력 + 학교 선택", "학교 B 선택 후 성공",
-        one(lambda r: r.cli(f"multi01@{DROOT}", typed=True, choose=D2), expect_success(f"multi01@{D2}", B)))
-    add("RO", "route", "Outlook 웹에 통합 아이디 입력", [("계정", f"student02@{DR}"), ("앱", "Outlook 웹")],
-        "실제 앱에서 통합 아이디로 학교 B 메일함이 열리는지", "Outlook 진입(학교 B 계정)",
+        one(lambda r: r.cli(f"student02@{DR}", typed=True), expect_success(f"student02@{D2}", B)))
+    add("RO", "route", "Outlook 웹에 SEN 아이디 입력", [("계정", f"student02@{DR}"), ("앱", "Outlook 웹")],
+        "실제 앱에서 SEN 아이디로 학교 B 메일함이 열리는지", "Outlook 진입(학교 B 계정)",
         app_flow("outlook", f"student02@{DR}", account=f"student02@{D2}", idp_user="student02"))
-    add("RT", "route", "Teams 웹에 통합 아이디 입력 → 학교 선택", [("계정", f"multi01@{DR}"), ("앱", "Teams 웹")],
-        "실제 앱에서 학교 선택 후 학교 A Teams가 열리는지", "Teams 진입(학교 A 계정)",
-        app_flow("teams", f"multi01@{DR}", account=f"multi01@{D1}", choose=D1, idp_user="multi01"))
+    add("RT", "route", "Teams 웹에 SEN 아이디 입력", [("계정", f"student01@{DR}"), ("앱", "Teams 웹")],
+        "실제 앱에서 SEN 아이디로 학교 A Teams가 열리는지", "Teams 진입(학교 A 계정)",
+        app_flow("teams", f"student01@{DR}", account=f"student01@{D1}", idp_user="student01"))
     # 보안 데모(학교 B, Microsoft 365 A5)
     add("S0", "attack", "대조군: 평소 위치에서 로그인", [("계정", f"hack01@{D2}"), ("정책", "로그인 위험 시 차단")],
         "평소 접속에서는 위험 탐지 없이 로그인되는지", "내 앱 진입",
@@ -1144,9 +1112,6 @@ class Recorder:
             if v.get("tenantId") == tid and v.get("mode") == "school":
                 return v.get("schoolName")
         return tid if not self.domains else "다른 테넌트"
-
-    def school_of_domain(self, domain):
-        return self.domains.get(domain, {}).get("schoolName", domain)
 
     def egress(self):
         try:

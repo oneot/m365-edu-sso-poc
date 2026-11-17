@@ -24,7 +24,8 @@ from app import create_app  # noqa: E402
 
 BASE = "https://auth.test"
 PW = "test-password"
-D1, D2, DR = "school1.example.edu", "school2.example.edu", "id.example.edu"
+D1, D2 = "school1.example.edu", "school2.example.edu"
+DR = "example.edu"  # SEN 아이디 도메인(라우팅 전용 테넌트에 페더레이션)
 
 
 def _keypair(cn):
@@ -50,21 +51,17 @@ def _account(uid, domain):
 def data_dir(tmp_path):
     (tmp_path / "domains.json").write_text(json.dumps({
         D1: {"mode": "school", "tenantId": "t1", "schoolName": "학교 A"},
-        # requireMfa(도메인)·mfa(계정)는 이전 IdP 2단계 인증 설정. 지금 IdP는 무시해야 한다.
-        D2: {"mode": "school", "tenantId": "t2", "schoolName": "학교 B", "requireMfa": True},
-        DR: {"mode": "route", "tenantId": "t1", "schoolName": "통합"},
+        D2: {"mode": "school", "tenantId": "t2", "schoolName": "학교 B"},
+        DR: {"mode": "route", "tenantId": "t0", "schoolName": "SEN 아이디"},
     }), encoding="utf-8")
     h = generate_password_hash(PW)
     users = {
         "student01": {"name": "학생01", "passwordHash": h, "accounts": [_account("student01", D1)], "flags": {}},
         "student02": {"name": "학생02", "passwordHash": h, "accounts": [_account("student02", D2)], "flags": {}},
-        "multi01": {"name": "겸임", "passwordHash": h, "accounts": [_account("multi01", D1), _account("multi01", D2)],
-                    "flags": {}},
+        "teacher01": {"name": "교사01", "passwordHash": h, "accounts": [_account("teacher01", D1)],
+                      "flags": {"routeIssuerFromRequest": True}},
         "badissuer01": {"name": "x", "passwordHash": h, "accounts": [_account("badissuer01", D1)],
                         "flags": {"badIssuer": True}},
-        "xdomain01": {"name": "x", "passwordHash": h, "accounts": [_account("xdomain01", D1)],
-                      "flags": {"routeIssuerFromRequest": True}},
-        "mfa01": {"name": "m", "passwordHash": h, "accounts": [_account("mfa01", D1)], "flags": {"mfa": True}},
     }
     (tmp_path / "users.json").write_text(json.dumps(users), encoding="utf-8")
     return str(tmp_path)
@@ -124,8 +121,7 @@ def qs_of(location):
 
 
 def k_from(location):
-    q = parse_qs(urlparse(location).query)
-    return q.get("k", [None])[0] or parse_qs(urlparse(q["next"][0]).query)["k"][0]
+    return qs_of(location)["k"]
 
 
 def login(client, uid, k=None):
@@ -207,27 +203,10 @@ def test_saml_post_page_does_not_restrict_form_action(client):
     assert "form-action 'self'" in get(client, "/healthz").headers["Content-Security-Policy"]
 
 
-def test_second_tenant_uses_existing_session(client):
-    full_flow(client, D1, "multi01")
-    r = start_sso(client, D2, "_req2")
-    assert r.status_code == 302 and "/saml/continue" in r.location
-    root, _, _ = saml_from(get(client, r.location))
-    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
-    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"multi01@{D2}"
-
-
-def test_route_domain_single_account_answers_with_school_issuer(client):
+def test_route_domain_answers_with_school_issuer(client):
     root, _, _ = saml_from(full_flow(client, DR, "student02"))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
-
-
-def test_route_domain_multi_account_shows_chooser(client):
-    r = full_flow(client, DR, "multi01")
-    body = r.get_data(as_text=True)
-    assert "어느 학교로 로그인할까요" in body
-    k = re.search(r'name="k" value="([^"]+)"', body).group(1)
-    root, _, _ = saml_from(post(client, "/saml/continue", data={"k": k, "domain": D2}))
-    assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D2}"
+    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"student02@{D2}"
 
 
 def test_unlinked_tenant_is_refused(client):
@@ -241,22 +220,12 @@ def test_bad_issuer_flag(client):
 
 
 def test_route_issuer_from_request_flag_only_affects_route_domain(client):
-    root, _, _ = saml_from(full_flow(client, DR, "xdomain01"))
+    root, _, _ = saml_from(full_flow(client, DR, "teacher01"))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{DR}"
-    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"xdomain01@{D1}"
+    assert text(root, ".//saml:Attribute/saml:AttributeValue") == f"teacher01@{D1}"
     r = start_sso(client, D1, "_req2")  # 같은 세션으로 학교 도메인에서 시작하면 학교 Issuer 그대로
     root, _, _ = saml_from(get(client, r.location))
     assert text(root, "saml:Issuer") == f"{BASE}/saml/m365/{D1}"
-
-
-def test_idp_never_asserts_mfa(app):
-    # MFA는 Entra가 수행한다. 이전 2단계 인증 설정(계정 mfa, 도메인 requireMfa)이 남아 있어도 IdP는 1차 인증만 표시한다.
-    c = app.test_client()
-    root, _, _ = saml_from(full_flow(c, D1, "mfa01"))
-    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
-    assert get(c, "/mfa").status_code == 404
-    root, _, _ = saml_from(full_flow(app.test_client(), D2, "student02"))
-    assert text(root, ".//saml:AuthnContextClassRef") == sc.AC_PASSWORD
 
 
 def test_passive_request_without_session_returns_nopassive(client):
@@ -390,16 +359,16 @@ def test_shared_pc_hint_mismatch_forces_login(client):
 
 
 def test_school_hint_mismatch_forces_login_without_prefill(client):
-    full_flow(client, D1, "multi01")
+    full_flow(client, D1, "teacher01")
     r = start_sso(client, D1, "_req2", username=f"student01@{D1}")
     q = qs_of(r.location)
     assert "/login" in r.location and q["err"] == "switch" and "user" not in q
 
 
 def test_matching_hint_reuses_session(client):
-    full_flow(client, D1, "multi01")
-    assert "/saml/continue" in start_sso(client, D1, "_req2", username=f"MULTI01@{D1}").location
-    assert "/saml/continue" in start_sso(client, DR, "_req3", username=f"multi01@{DR}").location
+    full_flow(client, D1, "student01")
+    assert "/saml/continue" in start_sso(client, D1, "_req2", username=f"STUDENT01@{D1}").location
+    assert "/saml/continue" in start_sso(client, DR, "_req3", username=f"student01@{DR}").location
 
 
 def test_passive_request_with_other_user_returns_nopassive(client):

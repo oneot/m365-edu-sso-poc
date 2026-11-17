@@ -7,7 +7,7 @@
 #   KEYS_DIR               current.key/current.pem, next.key/next.pem 이 있는 폴더
 #   SECRETS_FILE           SECRET_KEY, ADMIN_TOKEN 을 보관할 파일(없으면 새로 만든다)
 #   IDP_BASE_URL           (선택) 기본값 https://auth.joowon.me (로그인 화면도 이 주소의 /login)
-#   IDP_ID_DOMAIN          (선택) IdP 아이디 도메인 표시, 기본값 joowon.me
+#   IDP_ID_DOMAIN          (선택) SEN 아이디 도메인, 기본값 joowon.me
 #   SKIP_SETTINGS=1        (선택) 앱 설정은 그대로 두고 코드·데이터만 배포(빌드 중 재시작 방지)
 set -euo pipefail
 : "${SUB:?}" "${RG:?}" "${APP:?}" "${KEYS_DIR:?}" "${SECRETS_FILE:?}"
