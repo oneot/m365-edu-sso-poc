@@ -71,7 +71,7 @@
 - Microsoft 로그아웃은 SEN에 늘 전달되지는 않았습니다. 로그아웃 요청이 SEN 쿠키 없이 오거나 아예 오지 않았습니다(Edge에서 두 경우 모두 나왔고, Chromium·Edge 새 프로필 자동 시험에서는 오지 않음). 요청이 오면 NameID(ImmutableID)로 그 사용자의 SEN 세션을 서버에서 끝냅니다. 요청이 오지 않으면 SEN 로그인이 남아 있는 동안 Microsoft 계정 선택에서 그 계정을 골라 비밀번호 없이 다시 들어갈 수 있습니다.
 - 루트 2로 처음 로그인하면 다음부터 계정 선택 화면에는 학교 계정만 남습니다. 그래서 반복 로그인은 대부분 루트 3입니다.
 - 비밀번호는 세 루트 모두 SEN 화면에서만 입력합니다. MFA 대상 계정은 SEN 로그인 뒤 Entra MFA를 거칩니다.
-- 학교 A의 Microsoft 365 웹은 `copilot.cloud.microsoft`로 넘어가면서 로그인을 한 번 더 요청합니다. SEN 세션이 있어 비밀번호 없이 통과하지만 확인 화면이 더 뜹니다.
+- Microsoft 365 웹은 `copilot.cloud.microsoft`로 넘어가면서 로그인을 다시 요청합니다. SEN 세션이 있어 비밀번호 없이 통과하지만 확인 화면이 더 뜹니다.
   - 루트 2·3에서는 도메인 확인 화면이 1번 추가로 뜹니다.
   - '로그인 상태 유지'에 '아니요'를 골랐으면 그 화면도 1번 더 뜹니다.
 - 라우팅 전용 테넌트는 홈 영역 검색에서 SEN IdP 주소만 알려 줍니다. 이 테넌트에는 토큰 발급과 로그인 기록이 없고(0건), 이 테넌트를 지정한 앱 요청은 거부됩니다(AADSTS50020, R6).
@@ -288,7 +288,7 @@ python tools/record_demos.py --password-file ~/poc-test-password.txt --totp-file
 python tools/e2e_signin.py --password-file ~/poc-test-password.txt --totp-file ~/poc-entra-totp.json --out out/e2e.json
 
 # 루트 2(SEN 아이디) 실제 웹앱 브라우저 시연(헤드리스 Chrome, 임시 프로필, 단계별 화면 저장)
-python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --out-dir out/route-demo --route joowon.me
+python tools/browser_route_demo.py --password-file ~/poc-test-password.txt --out-dir out/route-demo
 
 # 보안 데모(학교 B). 필요한 관리자 권한은 tools/security_demo.py 머리말 참고(GRAPH_EXTRA_SCOPES)
 python tools/provision_users.py --users out/entra-users.json --skus <tenantId>=M365EDU_A5_STUDENT \
@@ -341,18 +341,19 @@ python tools/record_demos.py --out-dir out/demo --publish ../m365-edu-sso-poc-de
 | R7 | 공용 PC: 앞 학생의 SEN 세션이 남은 브라우저에서 다른 학생이 SEN 아이디 입력 | IdP가 `username`과 세션 사용자를 비교해 다시 로그인 요구, 입력한 학생으로 로그인 |
 | R8a | 무음 SSO(`prompt=none`) + SEN 아이디 힌트 | AADSTS50058(로그인된 계정과 힌트가 다름) 뒤 대화형 로그인 |
 | R8b / R8c | 무음 SSO + 학교 계정 힌트 / 힌트 없음 | 성공 |
-| R9 / R10 | 포털 링크 `domain_hint=joowon.me` / Microsoft 365 웹 `login_hint=SEN 아이디` | 성공 |
-| R11 | 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답 | 거부(AADSTS90072. 라우팅 도메인이 학교 테넌트에 있을 때는 AADSTS5000820) |
+| R9 / R10 | 포털 링크 `domain_hint=joowon.me` / Microsoft 365 웹 `m365.cloud.microsoft/login?es=Click&login_hint=SEN 아이디` | 성공 |
+| R11 | 잘못된 구현: IdP가 라우팅 도메인 Issuer로 응답 | 거부(AADSTS90072, SEN 아이디 직접 입력. `login_hint`로 시작하면 AADSTS90019) |
 | R12 | MFA 필수 계정(`mfa02`)이 SEN 아이디로 로그인 | 학교 B 계정의 Entra MFA(인증 앱 코드) 뒤 성공 |
 | R13 / R14 | Microsoft 로그인 화면에 SEN 아이디 입력(`student01@joowon.me`, `student02@joowon.me`) | 성공(학교 A / 학교 B), SEN 로그인 화면에 아이디가 미리 채워짐 |
 | 브라우저 | Outlook 웹·Teams 웹·Microsoft 365 웹에 SEN 아이디로 로그인 | 학교 계정으로 앱 진입 |
 
 - A1~P2와 인증서 교체는 2026-11-12에 시험했습니다.
 - C6~C8은 MFA 역할을 Entra로 옮긴 뒤 2026-11-14에 시험했습니다.
-- R5~R14는 라우팅 도메인이 학교 테넌트에 있을 때(2026-11-12) 시험했습니다. 라우팅 전용 테넌트로 옮긴 뒤(2026-11-15) R6·R9·R10·R11·R12·R13·R14를 다시 확인했습니다.
+- R5~R14 전체를 라우팅 전용 테넌트에서 다시 확인했습니다(2026-11-17).
 - 로그인 화면을 IdP(`auth.joowon.me/login`)로 옮긴 뒤(2026-11-17) A1·A2·A3, B2a·B2b, C1·C1b, C7·C8, F0·F1, P1·P2, R13·R14를 다시 확인했습니다(C8은 브라우저로 확인).
 - IdP 화면 디자인을 바꾼 뒤(2026-11-17) A1·A3·B2a·P1·R13·R14를 다시 확인했고, A3·P1·R13은 브라우저로도 확인했습니다.
 - SEN 포털을 'Microsoft 365로 이동하기' 단추 하나로 바꾼 뒤(2026-11-17) P1·P2를 다시 확인했습니다(P1은 브라우저로도 확인).
 - 브라우저에 다른 학교 계정(`student01`)이 로그인된 상태에서 `student02`로 SEN에 로그인해도 Microsoft 365가 `student02`로 열리는 것을 확인했습니다(2026-11-17).
 - Microsoft 로그아웃 요청이 SEN 쿠키 없이 와도 그 사용자의 SEN 세션이 끝나는 것(단위 시험)과, `auth.joowon.me`에 다시 들어오면 로그인이 남아 있어도 아이디·비밀번호 화면이 나오는 것(브라우저)을 확인했습니다(2026-11-17).
 - SEN 로그인을 8시간 유지하도록 바꾼 뒤(2026-11-17) 브라우저로 다음을 확인했습니다. Microsoft 로그인만 끝난 상태에서 Microsoft 365가 같은 계정으로 다시 로그인을 요청하면 SEN 로그인 화면 없이 Copilot으로 들어갔습니다(Microsoft의 도메인 확인·로그인 상태 유지 화면은 나옴). SEN 로그인이 없으면 SEN 로그인 화면이 나왔고, `auth.joowon.me`에 직접 들어오면 로그인 화면이 나왔습니다. A1·P1·P2·R9·R13·R14도 다시 통과했습니다.
+- 코드 정리 뒤(2026-11-17) 종단 시험 전체(A1~R14)와 브라우저 시연(Outlook·Teams·Microsoft 365)을 다시 통과했습니다.
