@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 import zlib
 from urllib.parse import parse_qs, urlparse
 
@@ -344,6 +345,16 @@ def test_login_shows_sen_portal_once_then_asks_again(client):
     page = get(client, "/").get_data(as_text=True)
     assert "학생01님, 안녕하세요" in page and "학교 A" in page and "student01@school1.example.edu" in page and go in page
     # 다시 들어오면 로그인이 남아 있어도 아이디·비밀번호부터 묻는다
+    assert urlparse(get(client, "/").location).path == "/login"
+
+
+def test_sen_login_answers_microsoft_without_password_hours_later(client, monkeypatch):
+    # m365.cloud.microsoft 재방문 등으로 Microsoft가 같은 계정의 로그인을 다시 요청하면 SEN 로그인이 남아 있는 동안 바로 응답한다
+    full_flow(client, D1, "student01")
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 2 * 3600)
+    assert urlparse(start_sso(client, D1, "_req2", username=f"student01@{D1}").location).path == "/saml/continue"
+    # auth.joowon.me에 직접 들어오면 그래도 아이디·비밀번호부터 묻는다
     assert urlparse(get(client, "/").location).path == "/login"
 
 

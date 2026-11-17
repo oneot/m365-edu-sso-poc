@@ -9,7 +9,8 @@ IdP 한 벌로 여러 테넌트를 처리한다.
 - 로그인 화면: IdP가 /login에서 직접 보낸다. 비밀번호 입력 화면에도 보안 헤더(다른 사이트의 iframe 삽입 차단 등)가 붙는다.
 - auth.joowon.me에 들어오면 늘 아이디·비밀번호를 묻고, 로그인한 바로 뒤(루트 1) SEN 포털 화면에 학교 계정과
   'Microsoft 365로 이동하기'를 보여 준다.
-- 로그인 유지 시간은 짧게(기본 10분) 둔다. Microsoft 로그아웃 알림이 SEN에 오지 않아도 오래된 로그인을 다시 쓰지 못하게 한다.
+- SEN 로그인은 기본 8시간 유지한다(IDP_SESSION_MINUTES). 그동안 Microsoft가 같은 계정의 로그인을 다시 요청하면
+  (예: m365.cloud.microsoft 재방문) 비밀번호 없이 응답한다. auth.joowon.me에 직접 들어오면 늘 아이디·비밀번호를 묻는다.
 """
 import base64
 import collections
@@ -30,7 +31,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.login-first"
+VERSION = "2026-11-17.sso-8h"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -62,7 +63,7 @@ def _env_config():
         "DATA_DIR": os.environ.get("DATA_DIR", os.path.join(HERE, "data")),
         "SECRET_KEY": os.environ.get("SECRET_KEY") or secrets.token_hex(32),
         "ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
-        "SESSION_MINUTES": float(os.environ.get("IDP_SESSION_MINUTES", "10")),
+        "SESSION_MINUTES": float(os.environ.get("IDP_SESSION_MINUTES", "480")),
         "ACTIVE_SIGNING": os.environ.get("ACTIVE_SIGNING", "current"),
         "KEYS": {
             "current": (pem("SIGNING_KEY_B64", "current.key"), pem("SIGNING_CERT_B64", "current.pem")),
