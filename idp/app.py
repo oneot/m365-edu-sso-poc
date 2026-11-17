@@ -28,7 +28,7 @@ import saml_core as sc
 HERE = os.path.dirname(os.path.abspath(__file__))
 PENDING_TTL = 15 * 60
 FAIL_WINDOW, FAIL_LIMIT = 10 * 60, 30
-VERSION = "2026-11-17.cleanup"
+VERSION = "2026-11-18.favicon"
 # Microsoft 365 계정 관리자가 다른 계정으로 바꿀 때 쓰는 주소다. 브라우저에 다른 Microsoft 계정(예: Edge 프로필의
 # 회사 계정)이 로그인돼 있어도 이 학교 계정으로 로그인을 새로 시작한다. 첫 화면 주소(/?login_hint=)는 그런 브라우저에서
 # 힌트를 무시하고 기존 계정으로 열릴 수 있다.
@@ -207,6 +207,10 @@ def create_app(overrides=None):
     def healthz():
         return {"ok": True, "version": VERSION, "activeSigning": cfg["ACTIVE_SIGNING"], "domains": sorted(domains),
                 "time": sc.fmt(sc.utcnow())}
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return app.send_static_file("favicon.ico")
 
     @app.get("/")
     def home():
